@@ -1,0 +1,25 @@
+# Prescription QR Scanner - Python Dependencies
+# All versions are stable and published at least 7 days ago
+
+# FastAPI - Modern, fast web framework for building APIs
+fastapi==0.109.0
+
+# Uvicorn - ASGI server for running FastAPI applications
+uvicorn[standard]==0.27.0
+
+# Firebase Admin SDK - Official Firebase Admin SDK for Python
+firebase-admin==6.4.0
+
+# Pydantic - Data validation using Python type annotations
+pydantic==2.5.3
+
+# python-dotenv - Read environment variables from .env file
+python-dotenv==1.0.0
+
+# qrcode - QR code generation library
+qrcode==7.4.2
+
+# Additional dependencies for uvicorn[standard]
+# These are included automatically but listed for clarity
+# h11==0.14.0
+# websockets==12.0

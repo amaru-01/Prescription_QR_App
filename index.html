@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prescription QR Scanner</title>
+    <link rel="icon" href="data:;base64,=">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .animate-slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+
+        #reader video {
+            border-radius: 12px;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-purple-600 flex items-center justify-center p-5">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+        <h1 class="text-2xl font-bold text-gray-800 text-center mb-2">📋 Prescription Scanner</h1>
+        <p class="text-gray-600 text-center text-sm mb-6">Scan prescription QR codes to log your medications securely</p>
+
+        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-5 text-sm text-yellow-800">
+            <h3 class="font-semibold text-sm mb-2">📌 How to use:</h3>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Ensure your QR code contains JSON with: <code class="bg-yellow-100 px-1 rounded">med</code>, <code class="bg-yellow-100 px-1 rounded">dose</code>, <code class="bg-yellow-100 px-1 rounded">duration</code></li>
+                <li>Example: <code class="bg-yellow-100 px-1 rounded text-xs">{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}</code></li>
+                <li>Grant camera permissions when prompted</li>
+            </ul>
+        </div>
+
+        <div id="reader" class="w-full rounded-xl overflow-hidden mb-5 bg-gray-100"></div>
+
+        <button id="startScan" class="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold rounded-xl text-base transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-500/40 active:translate-y-0 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:transform-none mb-4" onclick="startScanning()">
+            📷 Start Camera
+        </button>
+
+        <button id="stopScan" class="w-full py-4 bg-gradient-to-r from-pink-400 to-red-500 text-white font-semibold rounded-xl text-base transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-pink-500/40 active:translate-y-0 hidden mb-4" onclick="stopScanning()">
+            ⏹️ Stop Camera
+        </button>
+
+        <div id="message" class="hidden p-4 rounded-xl mt-4 text-sm animate-slide-in"></div>
+
+        <div id="prescriptionCard" class="hidden bg-gray-50 rounded-xl p-5 mt-4 animate-slide-in">
+            <div class="mb-3">
+                <div class="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-1">💊 Medication</div>
+                <div class="text-gray-900 text-base" id="medValue">-</div>
+            </div>
+            <div class="mb-3">
+                <div class="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-1">📏 Dosage</div>
+                <div class="text-gray-900 text-base" id="doseValue">-</div>
+            </div>
+            <div>
+                <div class="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-1">⏱️ Duration</div>
+                <div class="text-gray-900 text-base" id="durationValue">-</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
