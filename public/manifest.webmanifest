@@ -1,0 +1,50 @@
+{
+  "name": "VeriDose — Prescription QR scanner",
+  "short_name": "VeriDose",
+  "description": "Scan, review, and save prescription QR codes. Keep a clear medication history with reminders and exports.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f7f3",
+  "theme_color": "#0e7c66",
+  "categories": ["health", "medical", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Scan a prescription",
+      "short_name": "Scan",
+      "url": "/scan"
+    },
+    {
+      "name": "Prescription history",
+      "short_name": "History",
+      "url": "/history"
+    }
+  ]
+}
