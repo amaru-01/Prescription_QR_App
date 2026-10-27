@@ -14,10 +14,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 export const prescriptionApi = {
   /** List prescriptions with optional limit. */
   async list(limit = 100): Promise<Prescription[]> {
-    const url = new URL(`${API_BASE}/api/prescriptions`);
-    if (limit) url.searchParams.set("limit", limit.toString());
+    const params = new URLSearchParams();
+    if (limit) params.set("limit", limit.toString());
+    const query = params.toString();
+    const url = `${API_BASE}/api/prescriptions${query ? `?${query}` : ""}`;
 
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       cache: "no-store",
     });
 

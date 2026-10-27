@@ -15,7 +15,7 @@ import {
 import { PrescriptionActions } from "@/components/history/prescription-actions";
 import { SourceBadge, StatusBadge } from "@/components/ui/badges";
 import { BackendError } from "@/lib/server/errors";
-import { getPrescription } from "@/lib/server/prescriptions";
+import { getPrescriptionById } from "@/lib/server/prescriptions";
 import { formatDateTime, formatRelative, initialsFor } from "@/lib/format";
 import type { Prescription } from "@/types/prescription";
 
@@ -26,7 +26,7 @@ type PageProps = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
   try {
-    const record = await getPrescription(id);
+    const record = await getPrescriptionById(id);
     return {
       title: record ? `${record.med} ${record.dose}` : "Prescription",
       description: record ? `Prescription details for ${record.med} ${record.dose}, ${record.duration}.` : undefined,
@@ -43,7 +43,7 @@ export default async function PrescriptionDetailPage({ params }: PageProps) {
   let loadError: string | null = null;
 
   try {
-    record = await getPrescription(id);
+    record = await getPrescriptionById(id);
   } catch (error) {
     loadError =
       error instanceof BackendError
