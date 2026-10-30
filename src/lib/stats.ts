@@ -1,4 +1,5 @@
 import type { Prescription } from "@/types/prescription";
+import { dayKey } from "@/lib/format";
 
 export interface DashboardStats {
   total: number;
@@ -51,20 +52,19 @@ export function computeStats(prescriptions: Prescription[]): DashboardStats {
 }
 
 /**
- * Returns the last `n` days as Date objects, oldest first and today last.
- * Each date is set to local midnight.
+ * Returns the last `n` days as local day keys, oldest first and today last.
  *
  * Example: lastNDays(7) -> [6 days ago, ..., yesterday, today]
  */
-export function lastNDays(n: number): Date[] {
-  const days: Date[] = [];
+export function lastNDays(n: number): string[] {
+  const days: string[] = [];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
-    days.push(d);
+    days.push(dayKey(d));
   }
 
   return days;

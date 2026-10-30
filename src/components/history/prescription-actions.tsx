@@ -54,7 +54,7 @@ export function PrescriptionActions({ prescription }: { prescription: Prescripti
     if (!window.confirm("Delete this prescription permanently? This cannot be undone.")) return;
     setBusy("delete");
     try {
-      await prescriptionApi.remove(prescription.id);
+      await prescriptionApi.delete(prescription.id);
       window.dispatchEvent(new Event("veridose:data-changed"));
       toast({ title: "Prescription deleted", variant: "success" });
       router.push("/history");

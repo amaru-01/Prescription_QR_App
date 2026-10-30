@@ -13,9 +13,7 @@ export function ExportActions({ compact = false }: { compact?: boolean }) {
   const downloadCsv = async () => {
     setBusy("csv");
     try {
-      const response = await fetch(prescriptionApi.exportCsvUrl(), { cache: "no-store" });
-      if (!response.ok) throw new Error("Your download could not be prepared right now.");
-      const blob = await response.blob();
+      const blob = await prescriptionApi.export();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;

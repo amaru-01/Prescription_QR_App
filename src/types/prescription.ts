@@ -2,7 +2,7 @@ export type PrescriptionStatus = "active" | "completed" | "archived";
 
 export type PrescriptionSource = "scan" | "upload" | "manual" | "demo";
 
-export type DataSourceMode = "fastapi";
+export type DataSourceMode = "fastapi" | "local";
 
 /** Normalized prescription used everywhere in the UI. */
 export interface Prescription {
@@ -29,6 +29,8 @@ export interface PrescriptionDraft extends PrescriptionInput {
   notes?: string | null;
 }
 
+export type PrescriptionUpdate = Partial<Pick<Prescription, "status" | "notes">>;
+
 export interface PrescriptionFieldErrors {
   med?: string;
   dose?: string;
@@ -47,7 +49,7 @@ export interface SavePrescriptionResponse {
   success: true;
   message: string;
   document_id: string;
-  prescription?: Prescription;
+  prescription: Prescription;
 }
 
 export interface HealthResponse {

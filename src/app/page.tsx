@@ -37,7 +37,7 @@ export default async function HomePage() {
   return (
     <div className="space-y-7 pb-6 sm:space-y-8">
       <Onboarding />
-      <Hero stats={stats} mode="fastapi" />
+      <Hero stats={stats} />
       <StatsGrid stats={stats} />
 
       <Reveal>

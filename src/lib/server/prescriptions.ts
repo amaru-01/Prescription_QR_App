@@ -1,8 +1,15 @@
 import admin from "firebase-admin";
 import { getDb } from "./firebase";
-import type { Prescription, PrescriptionDraft, PrescriptionInput, PrescriptionStatus, HealthResponse } from "@/types/prescription";
+import type {
+  HealthResponse,
+  Prescription,
+  PrescriptionDraft,
+  PrescriptionInput,
+  PrescriptionStatus,
+  PrescriptionUpdate,
+} from "@/types/prescription";
 
-const DATA_MODE: "fastapi" | "local" = "fastapi";
+const DATA_MODE: HealthResponse["mode"] = "fastapi";
 
 /**
  * Get health status - mirrors FastAPI /health endpoint.
@@ -152,17 +159,12 @@ export async function getPrescriptionById(id: string): Promise<Prescription> {
   };
 }
 
-/**
- * Update prescription status.
- */
-export async function updatePrescriptionStatus(
-  id: string,
-  status: PrescriptionStatus
-): Promise<void> {
+/** Update the supported editable prescription fields. */
+export async function updatePrescription(id: string, updates: PrescriptionUpdate): Promise<void> {
   const db = getDb();
 
   await db.collection("prescriptions").doc(id).update({
-    status,
+    ...updates,
     updated_at: admin.firestore.FieldValue.serverTimestamp(),
   });
 }

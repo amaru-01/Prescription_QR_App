@@ -2,9 +2,9 @@ import { BackendError, errorResponse } from "@/lib/server/errors";
 import {
   deletePrescription,
   getPrescriptionById,
-  updatePrescriptionStatus,
+  updatePrescription,
 } from "@/lib/server/prescriptions";
-import type { PrescriptionStatus } from "@/types/prescription";
+import type { PrescriptionStatus, PrescriptionUpdate } from "@/types/prescription";
 
 export const dynamic = "force-dynamic";
 
@@ -26,17 +26,28 @@ export async function PATCH(request: Request, context: Context) {
   try {
     const { id } = await context.params;
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!body) throw new BackendError("Send a JSON body with status.", 400);
+    if (!body) throw new BackendError("Send a JSON body with status or notes.", 400);
 
-    if (body.status === undefined) {
-      throw new BackendError("Status field is required.", 400);
+    const updates: PrescriptionUpdate = {};
+    if ("status" in body) {
+      if (!STATUSES.includes(body.status as PrescriptionStatus)) {
+        throw new BackendError("Unknown prescription status.", 422);
+      }
+      updates.status = body.status as PrescriptionStatus;
     }
 
-    if (!STATUSES.includes(body.status as PrescriptionStatus)) {
-      throw new BackendError("Unknown prescription status.", 422);
+    if ("notes" in body) {
+      if (body.notes !== null && (typeof body.notes !== "string" || body.notes.length > 500)) {
+        throw new BackendError("Notes must be text no longer than 500 characters.", 422);
+      }
+      updates.notes = body.notes;
     }
 
-    await updatePrescriptionStatus(id, body.status as PrescriptionStatus);
+    if (Object.keys(updates).length === 0) {
+      throw new BackendError("Provide a status or notes field to update.", 400);
+    }
+
+    await updatePrescription(id, updates);
     const prescription = await getPrescriptionById(id);
     return Response.json({ success: true, prescription });
   } catch (error) {

@@ -5,6 +5,7 @@ import type {
   PrescriptionListResponse,
   SavePrescriptionResponse,
   HealthResponse,
+  PrescriptionUpdate,
 } from "@/types/prescription";
 
 /** Base URL for API calls. In production, this is relative to the same origin. */
@@ -68,6 +69,20 @@ export const prescriptionApi = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Failed to update prescription: ${res.status} ${text}`);
+    }
+  },
+
+  /** Update a prescription's status and/or notes. */
+  async update(id: string, updates: PrescriptionUpdate): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/prescriptions/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
     });
 
     if (!res.ok) {
