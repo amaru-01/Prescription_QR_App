@@ -16,7 +16,4 @@
       "dest": "/$1"
     }
   ],
-  "env": {
-    "FIREBASE_CREDENTIALS": "@firebase_credentials"
-  }
 }
