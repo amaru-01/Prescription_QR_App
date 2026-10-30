@@ -7,6 +7,10 @@ export const dynamic = "force-dynamic";
 
 const SOURCES: PrescriptionSource[] = ["scan", "upload", "manual", "demo"];
 
+/** Non-string values (missing, null, numbers...) become "" so the validator rejects them. */
+const asString = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
 /**
  * POST /api/save
  * Body: { med, dose, duration }  → same contract as the Python backend.
@@ -20,9 +24,9 @@ export async function POST(request: Request) {
     }
 
     const validation = validatePrescription({
-      med: body.med,
-      dose: body.dose,
-      duration: body.duration,
+      med: asString(body.med),
+      dose: asString(body.dose),
+      duration: asString(body.duration),
     });
     if (!validation.ok) {
       throw new BackendError("Please check the prescription fields.", 422, validation.errors);
