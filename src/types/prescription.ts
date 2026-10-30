@@ -1,6 +1,6 @@
 export type PrescriptionStatus = "active" | "completed" | "archived";
 
-export type PrescriptionSource = "scan" | "upload" | "manual";
+export type PrescriptionSource = "scan" | "upload" | "manual" | "demo";
 
 export type DataSourceMode = "fastapi";
 
