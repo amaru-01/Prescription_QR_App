@@ -49,3 +49,23 @@ export function computeStats(prescriptions: Prescription[]): DashboardStats {
 
   return stats;
 }
+
+/**
+ * Returns the last `n` days as Date objects, oldest first and today last.
+ * Each date is set to local midnight.
+ *
+ * Example: lastNDays(7) -> [6 days ago, ..., yesterday, today]
+ */
+export function lastNDays(n: number): Date[] {
+  const days: Date[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    days.push(d);
+  }
+
+  return days;
+}
