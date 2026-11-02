@@ -1,20 +1,10 @@
 import { requireUser } from "@/lib/server/auth";
-import { BackendError, errorResponse } from "@/lib/server/errors";
+import { errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { savePrescription } from "@/lib/server/prescriptions";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
-import { validatePrescription } from "@/lib/validation";
-import type { PrescriptionSource } from "@/types/prescription";
+import { saveRequestSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
-
-const SOURCES: PrescriptionSource[] = ["scan", "upload", "manual", "demo"];
-
-/** Keep in step with the PATCH /api/prescriptions/[id] notes limit. */
-const MAX_NOTES_LENGTH = 500;
-
-/** Non-string values (missing, null, numbers...) become "" so the validator rejects them. */
-const asString = (value: unknown): string =>
-  typeof value === "string" ? value : "";
 
 /**
  * POST /api/save
@@ -27,22 +17,13 @@ export async function POST(request: Request) {
     rateLimit(`save:${user.uid}`, 30, 60_000);
 
     const body = await readJsonBody(request);
+    const { source, notes, ...input } = parseOrThrow(
+      saveRequestSchema,
+      body,
+      "Please check the prescription fields."
+    );
 
-    const validation = validatePrescription({
-      med: asString(body.med),
-      dose: asString(body.dose),
-      duration: asString(body.duration),
-    });
-    if (!validation.ok) {
-      throw new BackendError("Please check the prescription fields.", 422, validation.errors);
-    }
-
-    const source = SOURCES.includes(body.source as PrescriptionSource)
-      ? (body.source as PrescriptionSource)
-      : "scan";
-    const notes = typeof body.notes === "string" ? body.notes.slice(0, MAX_NOTES_LENGTH) : null;
-
-    const result = await savePrescription(user.uid, validation.value, { source, notes });
+    const result = await savePrescription(user.uid, input, { source, notes: notes ?? null });
 
     return Response.json({
       success: true,

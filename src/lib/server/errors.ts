@@ -1,4 +1,8 @@
+import type { z } from "zod";
+
+import { fieldErrorsFrom, firstMessage } from "@/lib/schemas";
 import type { PrescriptionFieldErrors } from "@/types/prescription";
+import { logger } from "./logger";
 
 /**
  * Custom error class for backend errors. Its message is safe to show to users;
@@ -18,11 +22,32 @@ export class BackendError extends Error {
 }
 
 /**
+ * Parse with a Zod schema, or throw a 422 carrying per-field messages.
+ * `fieldMessage` is the summary used when prescription fields are invalid;
+ * other problems (e.g. notes too long) surface their own message.
+ */
+export function parseOrThrow<T extends z.ZodType>(
+  schema: T,
+  data: unknown,
+  fieldMessage?: string
+): z.output<T> {
+  const result = schema.safeParse(data);
+  if (result.success) return result.data;
+  const errors = fieldErrorsFrom(result.error);
+  const hasFieldErrors = Object.keys(errors).length > 0;
+  throw new BackendError(
+    hasFieldErrors && fieldMessage ? fieldMessage : firstMessage(result.error),
+    422,
+    hasFieldErrors ? errors : undefined
+  );
+}
+
+/**
  * Standard error response helper for API routes.
  */
 export function errorResponse(error: unknown): Response {
   if (error instanceof BackendError) {
-    if (error.statusCode >= 500) console.error("API Error:", error);
+    if (error.statusCode >= 500) logger.error("API error", { status: error.statusCode, error });
     return Response.json(
       {
         success: false,
@@ -38,7 +63,7 @@ export function errorResponse(error: unknown): Response {
 
   // Unexpected failures: log the details server-side, return only a reference id.
   const requestId = crypto.randomUUID();
-  console.error(`API Error [${requestId}]:`, error);
+  logger.error("Unhandled API error", { requestId, error });
 
   return Response.json(
     {

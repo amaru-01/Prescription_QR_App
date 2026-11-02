@@ -37,7 +37,8 @@ export function QrCamera({
 
   useEffect(() => stop, [stop]);
 
-  const tick = useCallback(() => {
+  // Named so each frame can schedule the next one without referencing `tick` mid-declaration.
+  const tick = useCallback(function scanFrame() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
@@ -71,7 +72,7 @@ export function QrCamera({
       }
     }
 
-    frameRef.current = requestAnimationFrame(tick);
+    frameRef.current = requestAnimationFrame(scanFrame);
   }, [onDecode]);
 
   const start = useCallback(

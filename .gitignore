@@ -43,3 +43,6 @@ coverage/
 
 # Debug
 .eslintcache
+
+# TypeScript incremental build cache
+*.tsbuildinfo

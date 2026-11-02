@@ -12,6 +12,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Providers } from "@/components/providers";
 import { PwaRegister } from "@/components/pwa-register";
 import { getSessionUser } from "@/lib/server/auth";
+import { logger } from "@/lib/server/logger";
 import type { SessionUser } from "@/types/auth";
 
 export const metadata: Metadata = {
@@ -39,7 +40,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "VeriDose — Prescription QR scanner",
     description:
-      "Scan, review, and save prescriptions in seconds. Medication history, reminders, exports, and offline-safe saving.",
+      "Scan, review, and save prescriptions in seconds. Medication history, reminders, and exports.",
     type: "website",
   },
 };
@@ -63,7 +64,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   try {
     user = await getSessionUser();
   } catch (error) {
-    console.error("Could not verify session:", error);
+    logger.error("Could not verify session", { error });
   }
 
   return (

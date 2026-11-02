@@ -9,8 +9,9 @@ import { Onboarding } from "@/components/onboarding";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Reveal, Tilt } from "@/components/motion";
 import { requirePageUser } from "@/lib/server/auth";
-import { listPrescriptions } from "@/lib/server/prescriptions";
-import { computeStats } from "@/lib/stats";
+import { logger } from "@/lib/server/logger";
+import { getPrescriptionStats, listPrescriptions } from "@/lib/server/prescriptions";
+import { computeStats, type DashboardStats } from "@/lib/stats";
 import type { Prescription } from "@/types/prescription";
 
 export const dynamic = "force-dynamic";
@@ -24,18 +25,16 @@ const FLOW = [
 
 export default async function HomePage() {
   const user = await requirePageUser("/");
-  let prescriptions: Prescription[] = [];
+  let recent: Prescription[] = [];
+  let stats: DashboardStats = computeStats([]);
   let loadError: string | null = null;
 
   try {
-    prescriptions = await listPrescriptions(user.uid, 100);
+    [recent, stats] = await Promise.all([listPrescriptions(user.uid, 4), getPrescriptionStats(user.uid)]);
   } catch (error) {
-    console.error("Could not load prescriptions:", error);
+    logger.error("Could not load dashboard", { uid: user.uid, error });
     loadError = "Could not load prescriptions right now.";
   }
-
-  const stats = computeStats(prescriptions);
-  const recent = prescriptions.slice(0, 4);
 
   return (
     <div className="space-y-7 pb-6 sm:space-y-8">

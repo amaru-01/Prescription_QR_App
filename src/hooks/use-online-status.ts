@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-/** Tracks connectivity so saves can be queued while offline. */
+/** Tracks connectivity so the UI can explain why saving is unavailable offline. */
 export function useOnlineStatus(): boolean {
   const [online, setOnline] = useState(true);
 

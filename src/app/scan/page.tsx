@@ -109,7 +109,7 @@ export default async function ScanPage() {
 
             <div className="mt-3 flex items-start gap-2 rounded-xl bg-accent-soft/60 p-3 text-xs leading-relaxed text-muted">
               <WifiOff className="mt-0.5 size-3.5 shrink-0 text-accent" aria-hidden />
-              No connection? You can still save. VeriDose will sync when you&apos;re back online.
+              No connection? Scanning still works offline, but saving needs a connection. Your scan stays on screen until you&apos;re back online.
             </div>
           </section>
 

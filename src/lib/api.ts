@@ -7,6 +7,7 @@ import type {
   HealthResponse,
   PrescriptionUpdate,
 } from "@/types/prescription";
+import type { DashboardStats } from "@/lib/stats";
 
 /** Base URL for API calls. In production, this is relative to the same origin. */
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
@@ -40,6 +41,9 @@ async function request(path: string, init: RequestInit = {}, fallback = "Somethi
 
   if (res.status === 401 && typeof window !== "undefined") {
     const next = `${window.location.pathname}${window.location.search}`;
+    // Deliberately a full navigation (not router.push): it discards in-memory client
+    // state from the expired session, and this helper runs outside React.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.assign(`/login?next=${encodeURIComponent(next)}`);
   }
 
@@ -53,14 +57,21 @@ const json = (body: unknown): RequestInit => ({
 
 /** Client-side API wrapper for prescription operations. */
 export const prescriptionApi = {
-  /** List prescriptions with optional limit. */
-  async list(limit = 100): Promise<Prescription[]> {
-    const params = new URLSearchParams();
-    if (limit) params.set("limit", limit.toString());
-    const query = params.toString();
-    const res = await request(`/api/prescriptions${query ? `?${query}` : ""}`, {}, "Could not load prescriptions.");
+  /** One page of prescriptions, newest first. Pass the previous `nextCursor` to continue. */
+  async listPage(
+    { limit = 50, cursor }: { limit?: number; cursor?: string | null } = {},
+  ): Promise<{ prescriptions: Prescription[]; nextCursor: string | null }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    const res = await request(`/api/prescriptions?${params}`, {}, "Could not load prescriptions.");
     const data = (await res.json()) as PrescriptionListResponse;
-    return data.prescriptions;
+    return { prescriptions: data.prescriptions, nextCursor: data.next_cursor };
+  },
+
+  /** Totals across all of the user's records. */
+  async stats(): Promise<DashboardStats> {
+    const res = await request("/api/prescriptions/stats", {}, "Could not load your totals.");
+    return ((await res.json()) as { success: true; stats: DashboardStats }).stats;
   },
 
   /** Save a prescription. */

@@ -55,7 +55,16 @@ export function SettingsView() {
   };
 
   useEffect(() => {
-    void checkHealth();
+    // Initial check: state starts as "checking", so only settle it when the request finishes.
+    let cancelled = false;
+    prescriptionApi
+      .health()
+      .then((result) => !cancelled && setHealth(result))
+      .catch(() => !cancelled && setHealthError("We couldn't check your connection right now. Please try again."))
+      .finally(() => !cancelled && setChecking(false));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

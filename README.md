@@ -264,7 +264,26 @@ Edit `.env` with your Firebase project values.
 npm run dev
 ```
 
+<<<<<<< HEAD
+### Automated tests
+
+```bash
+npm test            # run once (Vitest)
+npm run test:watch  # re-run on change
+```
+
+Tests live next to the code (`*.test.ts`) and cover the shared Zod schemas, QR parsing,
+CSV export escaping, the security helpers (same-origin checks, body limits, rate limiting),
+session verification and revocation, and the API routes' 401/403/404/422 behaviour.
+Firestore itself is stubbed; an emulator-backed suite is a good next step.
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, build and a production
+dependency audit on every push to `main` and every pull request.
+
+### Test the API Endpoints
+=======
 Open `http://localhost:3000`
+>>>>>>> 54f656f0b10c14c927bba812b81dc65825faca2b
 
 ### 4) Build for production
 
@@ -277,9 +296,11 @@ Open `http://localhost:3000`
      -d '{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}'
    ```
 
-3. **Retrieve Prescriptions**
+3. **Retrieve Prescriptions** (paginated: pass the returned `next_cursor` as `cursor`)
    ```bash
-   curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions?limit=5
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5"
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5&cursor=NEXT_CURSOR"
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions/stats
    ```
 
    Without the cookie, both return `401`.
@@ -313,6 +334,43 @@ curl "http://localhost:3000/api/prescriptions?limit=5"
 ```text
 Prescription_QR_App/
 ├── src/
+<<<<<<< HEAD
+│   ├── app/                    # Next.js App Router pages
+│   │   ├── api/               # API routes
+│   │   │   ├── health/        # Health check endpoint
+│   │   │   ├── save/          # Save prescription endpoint
+│   │   │   └── prescriptions/ # Prescription CRUD endpoints
+│   │   ├── history/           # History page
+│   │   ├── scan/              # Scan page
+│   │   ├── settings/          # Settings page
+│   │   └── page.tsx           # Home page
+│   ├── components/            # React components
+│   │   ├── dashboard/        # Dashboard components
+│   │   ├── scan/             # Scan-related components
+│   │   ├── history/          # History-related components
+│   │   └── ui/               # UI components
+│   ├── hooks/                 # Custom React hooks
+│   ├── lib/                   # Utility functions
+│   │   ├── api.ts            # API client
+│   │   ├── server/           # Server-side utilities
+│   │   │   ├── firebase.ts   # Firebase initialization
+│   │   │   ├── prescriptions.ts # Prescription operations
+│   │   │   └── errors.ts     # Error handling
+│   │   ├── schemas.ts        # Zod schemas shared by client and server
+│   │   ├── validation.ts     # QR parsing + form validation (built on schemas.ts)
+│   │   └── stats.ts          # Statistics computation
+│   └── types/                # TypeScript type definitions
+│       └── prescription.ts   # Prescription types
+├── public/                    # Static assets
+├── .env.example              # Example environment variables
+├── .gitignore                # Git ignore rules
+├── firebase-service-account.json # Firebase credentials (local, not committed)
+├── next.config.ts            # Next.js configuration
+├── package.json              # Dependencies
+├── tsconfig.json             # TypeScript configuration
+├── tailwind.config.ts        # Tailwind CSS configuration
+└── README.md                 # This file
+=======
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── health/
@@ -379,6 +437,7 @@ Prescription_QR_App/
 ```bash
 rm -rf node_modules package-lock.json
 npm install
+>>>>>>> 54f656f0b10c14c927bba812b81dc65825faca2b
 ```
 
 ## 🚀 Future Improvements

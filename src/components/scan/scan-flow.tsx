@@ -20,6 +20,7 @@ import { QrUploader } from "@/components/scan/qr-uploader";
 import { ScanPreview } from "@/components/scan/scan-preview";
 import { SourceBadge } from "@/components/ui/badges";
 import { Confetti } from "@/components/motion";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useToast } from "@/hooks/use-toasts";
 import { prescriptionApi } from "@/lib/api";
 import { formatDateTime, formatRelative } from "@/lib/format";
@@ -92,6 +93,7 @@ export function ScanFlow() {
   const [savedRecord, setSavedRecord] = useState<Prescription | null>(null);
 
   const { toast } = useToast();
+  const online = useOnlineStatus();
 
   const handlePayload = useCallback(
     (raw: string, source: PrescriptionSource) => {
@@ -126,6 +128,12 @@ export function ScanFlow() {
 
   const save = useCallback(async () => {
     if (!draft) return;
+    if (!online) {
+      // Nothing is queued: keep the draft on screen so it can be saved once back online.
+      setFormError("You're offline. Your scan is kept here. Save it once you're back online.");
+      toast({ title: "You're offline", description: "Reconnect, then tap save again.", variant: "error" });
+      return;
+    }
     const validation = validatePrescription(draft);
     if (!validation.ok) {
       setErrors(validation.errors);
@@ -159,7 +167,7 @@ export function ScanFlow() {
     } finally {
       setSaving(false);
     }
-  }, [draft, toast]);
+  }, [draft, online, toast]);
 
   const reset = useCallback(() => {
     setStage("capture");

@@ -1,38 +1,33 @@
 import { requireUser } from "@/lib/server/auth";
 import { BackendError, errorResponse } from "@/lib/server/errors";
-import { listPrescriptions, MAX_LIST_LIMIT } from "@/lib/server/prescriptions";
+import { listPrescriptionPage } from "@/lib/server/prescriptions";
+import { firstMessage, listQuerySchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/prescriptions?limit=10
- * Unchanged response contract: { success, count, prescriptions[] }, scoped to
- * the signed-in user. Records include normalized status/source/notes.
+ * GET /api/prescriptions?limit=50&cursor=<id>
+ * One page of the signed-in user's prescriptions, newest first:
+ * { success, count, prescriptions[], next_cursor }.
  */
 export async function GET(request: Request) {
   try {
     const user = await requireUser();
 
-    const rawLimit = new URL(request.url).searchParams.get("limit");
-    let limit = 100;
+    const params = new URL(request.url).searchParams;
+    const query = listQuerySchema.safeParse({
+      limit: params.get("limit") ?? undefined,
+      cursor: params.get("cursor") ?? undefined,
+    });
+    if (!query.success) throw new BackendError(firstMessage(query.error), 400);
 
-    if (rawLimit !== null) {
-      if (!/^\d+$/.test(rawLimit)) {
-        throw new BackendError("Limit must be a positive integer.", 400);
-      }
-
-      limit = Number(rawLimit);
-      if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT) {
-        throw new BackendError(`Limit must be between 1 and ${MAX_LIST_LIMIT}.`, 400);
-      }
-    }
-
-    const prescriptions = await listPrescriptions(user.uid, limit);
+    const page = await listPrescriptionPage(user.uid, query.data);
     return Response.json(
       {
         success: true,
-        count: prescriptions.length,
-        prescriptions,
+        count: page.prescriptions.length,
+        prescriptions: page.prescriptions,
+        next_cursor: page.nextCursor,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

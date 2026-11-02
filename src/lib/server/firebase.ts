@@ -2,6 +2,8 @@ import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
 
+import { logger } from "./logger";
+
 let db: admin.firestore.Firestore | null = null;
 
 /**
@@ -61,13 +63,13 @@ export function initializeFirebase(): admin.firestore.Firestore {
       admin.initializeApp({
         credential: admin.credential.cert(loadServiceAccount()),
       });
-      console.log("Firebase Admin SDK initialized successfully");
+      logger.info("Firebase Admin SDK initialized");
     }
 
     db = admin.firestore();
     return db;
   } catch (error) {
-    console.error("Error initializing Firebase:", error);
+    logger.error("Error initializing Firebase", { error });
     throw new Error(
       `Failed to initialize Firebase: ${
         error instanceof Error ? error.message : String(error)
