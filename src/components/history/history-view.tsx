@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowDownUp,
   ClipboardList,
+  Loader2,
   RefreshCw,
   ScanLine,
   Search,
@@ -36,20 +37,24 @@ const SORTS: { id: Sort; label: string }[] = [
 ];
 
 export function HistoryView() {
-  const { prescriptions, loading, error, refresh } = usePrescriptions(100);
+  const { prescriptions, stats, loading, loadingMore, hasMore, error, refresh, loadMore } = usePrescriptions(50);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("newest");
 
+  // Account-wide totals from the server; fall back to the loaded page if unavailable.
   const counts = useMemo(
-    () => ({
-      all: prescriptions.length,
-      active: prescriptions.filter((item) => item.status === "active").length,
-      completed: prescriptions.filter((item) => item.status === "completed").length,
-      archived: prescriptions.filter((item) => item.status === "archived").length,
-    }),
-    [prescriptions],
+    () =>
+      stats
+        ? { all: stats.total, active: stats.active, completed: stats.completed, archived: stats.archived }
+        : {
+            all: prescriptions.length,
+            active: prescriptions.filter((item) => item.status === "active").length,
+            completed: prescriptions.filter((item) => item.status === "completed").length,
+            archived: prescriptions.filter((item) => item.status === "archived").length,
+          },
+    [prescriptions, stats],
   );
 
   const filtered = useMemo(() => {
@@ -210,25 +215,43 @@ export function HistoryView() {
         <EmptyState
           icon={<Search className="size-7" aria-hidden />}
           title="No matches"
-          description="Nothing matches your current search and filters. Try a different medication name or reset the filters."
+          description={
+            hasMore
+              ? "Nothing in the loaded records matches. Older records aren't loaded yet. Load them to search further back."
+              : "Nothing matches your current search and filters. Try a different medication name or reset the filters."
+          }
           action={
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                setFilter("all");
-              }}
-              className="btn btn-secondary min-h-11"
-            >
-              Clear filters
-            </button>
+            <div className="flex flex-wrap justify-center gap-2">
+              {hasMore ? (
+                <button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  className="btn btn-primary min-h-11"
+                >
+                  {loadingMore ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                  Load older records
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery("");
+                  setFilter("all");
+                }}
+                className="btn btn-secondary min-h-11"
+              >
+                Clear filters
+              </button>
+            </div>
           }
         />
       ) : (
         <>
           <p className="no-print text-xs font-semibold text-muted" aria-live="polite">
-            Showing {filtered.length} of {prescriptions.length} prescriptions
+            Showing {filtered.length} of {counts.all} prescriptions
             {hasFilters ? " (filtered)" : ""}
+            {hasMore && hasFilters ? " · search and filters cover loaded records only" : ""}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {filtered.map((prescription, index) => (
@@ -241,6 +264,19 @@ export function HistoryView() {
               </div>
             ))}
           </div>
+          {hasMore ? (
+            <div className="no-print flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                className="btn btn-secondary min-h-11 px-5 text-sm"
+              >
+                {loadingMore ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                {loadingMore ? "Loading…" : "Load older prescriptions"}
+              </button>
+            </div>
+          ) : null}
         </>
       )}
     </div>

@@ -1,4 +1,7 @@
 import admin from "firebase-admin";
+
+import { MAX_LIST_LIMIT } from "@/lib/schemas";
+import type { DashboardStats } from "@/lib/stats";
 import { BackendError } from "./errors";
 import { getDb } from "./firebase";
 import type {
@@ -9,10 +12,7 @@ import type {
   PrescriptionUpdate,
 } from "@/types/prescription";
 
-const DATA_MODE: HealthResponse["mode"] = "fastapi";
-
-/** Hard cap on how many records a single list request can read. */
-export const MAX_LIST_LIMIT = 500;
+export { MAX_LIST_LIMIT };
 
 /** Firestore gRPC status code for a missing document. */
 const NOT_FOUND_CODE = 5;
@@ -35,7 +35,7 @@ function toIso(value: unknown): string | null {
   return null;
 }
 
-function toPrescription(id: string, data: admin.firestore.DocumentData | undefined): Prescription {
+export function toPrescription(id: string, data: admin.firestore.DocumentData | undefined): Prescription {
   return {
     id,
     med: data?.med || "",
@@ -49,44 +49,85 @@ function toPrescription(id: string, data: admin.firestore.DocumentData | undefin
 }
 
 /**
- * Get health status - mirrors FastAPI /health endpoint.
+ * Health status. Reports whether the Admin SDK could be initialised; it does
+ * not expose any configuration details.
  */
 export async function getHealth(): Promise<HealthResponse> {
+  const timestamp = new Date().toISOString();
   try {
     getDb();
-    const timestamp = new Date().toISOString();
-
-    return {
-      ok: true,
-      status: "healthy",
-      firebase: "connected",
-      timestamp,
-      mode: DATA_MODE,
-      storage: "firebase",
-    };
+    return { ok: true, status: "healthy", firebase: "connected", timestamp, storage: "firebase" };
   } catch {
-    const timestamp = new Date().toISOString();
-    return {
-      ok: false,
-      status: "unhealthy",
-      firebase: "disconnected",
-      timestamp,
-      mode: DATA_MODE,
-      storage: "firebase",
-    };
+    return { ok: false, status: "unhealthy", firebase: "disconnected", timestamp, storage: "firebase" };
   }
 }
 
+export interface PrescriptionPage {
+  prescriptions: Prescription[];
+  /** Pass back as `cursor` to fetch the next page; null when there are no more. */
+  nextCursor: string | null;
+}
+
 /**
- * List the user's prescriptions, newest first.
+ * One page of the user's prescriptions, newest first. `cursor` is the id of
+ * the last record of the previous page; anchoring on the document (not its
+ * timestamp) keeps paging stable when two records share a timestamp.
+ */
+export async function listPrescriptionPage(
+  uid: string,
+  { limit = 100, cursor }: { limit?: number; cursor?: string } = {}
+): Promise<PrescriptionPage> {
+  const collection = userPrescriptions(uid);
+  const pageSize = Math.min(Math.max(1, limit), MAX_LIST_LIMIT);
+
+  let query = collection.orderBy("created_at", "desc");
+  if (cursor) {
+    const anchor = await collection.doc(cursor).get();
+    if (!anchor.exists) throw new BackendError("That page is no longer available. Refresh to start again.", 400);
+    query = query.startAfter(anchor);
+  }
+
+  // Fetch one extra record to learn whether another page exists.
+  const snapshot = await query.limit(pageSize + 1).get();
+  const docs = snapshot.docs.slice(0, pageSize);
+
+  return {
+    prescriptions: docs.map((doc) => toPrescription(doc.id, doc.data())),
+    nextCursor: snapshot.docs.length > pageSize ? docs[docs.length - 1].id : null,
+  };
+}
+
+/**
+ * List the user's most recent prescriptions, newest first.
  */
 export async function listPrescriptions(uid: string, limit = 100): Promise<Prescription[]> {
-  const snapshot = await userPrescriptions(uid)
-    .orderBy("created_at", "desc")
-    .limit(Math.min(Math.max(1, limit), MAX_LIST_LIMIT))
-    .get();
+  return (await listPrescriptionPage(uid, { limit })).prescriptions;
+}
 
-  return snapshot.docs.map((doc) => toPrescription(doc.id, doc.data()));
+/**
+ * Dashboard totals for all of the user's records, using Firestore count
+ * aggregations (billed at one read per 1,000 records) instead of loading them.
+ */
+export async function getPrescriptionStats(uid: string): Promise<DashboardStats> {
+  const collection = userPrescriptions(uid);
+  const weekAgo = admin.firestore.Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const count = async (query: admin.firestore.Query) => (await query.count().get()).data().count;
+
+  const [total, active, completed, archived, thisWeek, meds] = await Promise.all([
+    count(collection),
+    count(collection.where("status", "==", "active")),
+    count(collection.where("status", "==", "completed")),
+    count(collection.where("status", "==", "archived")),
+    count(collection.where("created_at", ">=", weekAgo)),
+    // Firestore cannot count distinct values; read only the `med` field.
+    collection.select("med").limit(MAX_LIST_LIMIT).get(),
+  ]);
+
+  const uniqueMeds = new Set(
+    meds.docs.map((doc) => String(doc.get("med") ?? "").trim().toLowerCase()).filter(Boolean)
+  ).size;
+
+  return { total, active, completed, archived, thisWeek, uniqueMeds };
 }
 
 /**
@@ -171,17 +212,13 @@ export async function deletePrescription(uid: string, id: string): Promise<void>
  * Quote a CSV field per RFC 4180 and neutralise spreadsheet formulas, so a
  * crafted QR payload like `=HYPERLINK(...)` is shown as text, not executed.
  */
-function csvField(value: string): string {
+export function csvField(value: string): string {
   const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-/**
- * Export the user's prescriptions as CSV.
- */
-export async function exportPrescriptions(uid: string): Promise<string> {
-  const prescriptions = await listPrescriptions(uid, MAX_LIST_LIMIT);
-
+/** Render prescriptions as a CSV document (CRLF line endings, header row first). */
+export function toCsv(prescriptions: Prescription[]): string {
   const headers = ["ID", "Medication", "Dosage", "Duration", "Status", "Source", "Notes", "Created At"];
   const rows = prescriptions.map((p) => [
     p.id,
@@ -195,4 +232,11 @@ export async function exportPrescriptions(uid: string): Promise<string> {
   ]);
 
   return [headers, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+}
+
+/**
+ * Export the user's prescriptions as CSV.
+ */
+export async function exportPrescriptions(uid: string): Promise<string> {
+  return toCsv(await listPrescriptions(uid, MAX_LIST_LIMIT));
 }

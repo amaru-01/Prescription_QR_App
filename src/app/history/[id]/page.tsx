@@ -15,6 +15,7 @@ import {
 import { PrescriptionActions } from "@/components/history/prescription-actions";
 import { SourceBadge, StatusBadge } from "@/components/ui/badges";
 import { requirePageUser } from "@/lib/server/auth";
+import { logger } from "@/lib/server/logger";
 import { BackendError } from "@/lib/server/errors";
 import { getPrescriptionById } from "@/lib/server/prescriptions";
 import { formatDateTime, formatRelative, initialsFor } from "@/lib/format";
@@ -40,7 +41,7 @@ export default async function PrescriptionDetailPage({ params }: PageProps) {
     record = await getPrescriptionById(user.uid, id);
   } catch (error) {
     if (error instanceof BackendError && error.statusCode === 404) notFound();
-    console.error("Could not load prescription:", error);
+    logger.error("Could not load prescription", { uid: user.uid, id, error });
     loadError = "The prescription service is unavailable right now. Please try again in a moment.";
   }
 

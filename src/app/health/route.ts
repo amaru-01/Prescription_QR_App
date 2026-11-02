@@ -4,8 +4,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /health
- * Compatibility alias for the original FastAPI health endpoint. `/api/health`
- * remains the primary path used by the UI.
+ * Alias of `/api/health` for uptime monitors that expect a root-level path.
  */
 export async function GET() {
   const health = await getHealth();

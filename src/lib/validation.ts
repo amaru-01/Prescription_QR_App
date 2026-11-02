@@ -1,90 +1,58 @@
+import { z } from "zod";
+
+import { fieldErrorsFrom, KNOWN_QR_FIELDS, prescriptionInputSchema } from "@/lib/schemas";
 import type { PrescriptionInput, PrescriptionFieldErrors, ParseResult } from "@/types/prescription";
+
+/**
+ * Deliberately lenient: a QR code only needs the three fields as non-empty
+ * text. Length limits are checked at save time, so an over-long value lands
+ * on the review screen where the user can fix it instead of a dead end.
+ */
+const qrPayloadSchema = z.object({
+  med: z.string({ error: "Missing medication name (med)" }).trim().min(1, "Missing medication name (med)"),
+  dose: z.string({ error: "Missing dosage (dose)" }).trim().min(1, "Missing dosage (dose)"),
+  duration: z.string({ error: "Missing duration" }).trim().min(1, "Missing duration"),
+});
 
 /**
  * Parse prescription payload from QR code or manual input.
  * Handles JSON parsing and basic structure validation.
  */
 export function parsePrescriptionPayload(raw: string): ParseResult {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    
-    if (typeof parsed !== "object" || parsed === null) {
-      return { ok: false, message: "The QR code does not contain valid data." };
-    }
-
-    const warnings: string[] = [];
-    
-    // Check for required fields
-    if (!parsed.med || typeof parsed.med !== "string") {
-      return { ok: false, message: "Missing medication name (med)", fieldErrors: { med: "Required" } };
-    }
-    if (!parsed.dose || typeof parsed.dose !== "string") {
-      return { ok: false, message: "Missing dosage (dose)", fieldErrors: { dose: "Required" } };
-    }
-    if (!parsed.duration || typeof parsed.duration !== "string") {
-      return { ok: false, message: "Missing duration", fieldErrors: { duration: "Required" } };
-    }
-
-    // Warn about extra fields
-    const knownFields = ["med", "dose", "duration", "notes", "source"];
-    const extraFields = Object.keys(parsed).filter((key) => !knownFields.includes(key));
-    if (extraFields.length > 0) {
-      warnings.push(`Extra fields ignored: ${extraFields.join(", ")}`);
-    }
-
-    return {
-      ok: true,
-      value: {
-        med: parsed.med,
-        dose: parsed.dose,
-        duration: parsed.duration,
-      },
-      warnings,
-    };
-  } catch (error) {
+    parsed = JSON.parse(raw);
+  } catch {
     return { ok: false, message: "Could not read the QR code. Please try again." };
   }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, message: "The QR code does not contain valid data." };
+  }
+
+  const result = qrPayloadSchema.safeParse(parsed);
+  if (!result.success) {
+    const fieldErrors = fieldErrorsFrom(result.error);
+    return {
+      ok: false,
+      message: result.error.issues[0]?.message ?? "The QR code is missing prescription details.",
+      fieldErrors: Object.fromEntries(Object.keys(fieldErrors).map((key) => [key, "Required"])),
+    };
+  }
+
+  const extraFields = Object.keys(parsed).filter((key) => !KNOWN_QR_FIELDS.includes(key));
+  const warnings = extraFields.length > 0 ? [`Extra fields ignored: ${extraFields.join(", ")}`] : [];
+
+  return { ok: true, value: result.data, warnings };
 }
 
 /**
- * Validate prescription input - mirrors FastAPI Pydantic model validation.
+ * Validate prescription input before saving (same rules the API enforces).
  */
 export function validatePrescription(
   input: PrescriptionInput
 ): { ok: true; value: PrescriptionInput } | { ok: false; errors: PrescriptionFieldErrors } {
-  const errors: PrescriptionFieldErrors = {};
-
-  // Validate medication name
-  if (!input.med || typeof input.med !== "string" || !input.med.trim()) {
-    errors.med = "Medication name cannot be empty";
-  } else if (input.med.trim().length > 120) {
-    errors.med = "Medication name is too long (max 120 characters)";
-  }
-
-  // Validate dose
-  if (!input.dose || typeof input.dose !== "string" || !input.dose.trim()) {
-    errors.dose = "Dosage cannot be empty";
-  } else if (input.dose.trim().length > 120) {
-    errors.dose = "Dosage is too long (max 120 characters)";
-  }
-
-  // Validate duration
-  if (!input.duration || typeof input.duration !== "string" || !input.duration.trim()) {
-    errors.duration = "Duration cannot be empty";
-  } else if (input.duration.trim().length > 120) {
-    errors.duration = "Duration is too long (max 120 characters)";
-  }
-
-  if (Object.keys(errors).length > 0) {
-    return { ok: false, errors };
-  }
-
-  return {
-    ok: true,
-    value: {
-      med: input.med.trim(),
-      dose: input.dose.trim(),
-      duration: input.duration.trim(),
-    },
-  };
+  const result = prescriptionInputSchema.safeParse(input);
+  if (!result.success) return { ok: false, errors: fieldErrorsFrom(result.error) };
+  return { ok: true, value: result.data };
 }

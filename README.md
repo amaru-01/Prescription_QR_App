@@ -239,6 +239,21 @@ npm run migrate:prescriptions -- --email you@example.com --apply --delete-origin
 
 ## 🧪 Testing
 
+### Automated tests
+
+```bash
+npm test            # run once (Vitest)
+npm run test:watch  # re-run on change
+```
+
+Tests live next to the code (`*.test.ts`) and cover the shared Zod schemas, QR parsing,
+CSV export escaping, the security helpers (same-origin checks, body limits, rate limiting),
+session verification and revocation, and the API routes' 401/403/404/422 behaviour.
+Firestore itself is stubbed; an emulator-backed suite is a good next step.
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, build and a production
+dependency audit on every push to `main` and every pull request.
+
 ### Test the API Endpoints
 
 1. **Health Check**
@@ -255,9 +270,11 @@ npm run migrate:prescriptions -- --email you@example.com --apply --delete-origin
      -d '{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}'
    ```
 
-3. **Retrieve Prescriptions**
+3. **Retrieve Prescriptions** (paginated: pass the returned `next_cursor` as `cursor`)
    ```bash
-   curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions?limit=5
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5"
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5&cursor=NEXT_CURSOR"
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions/stats
    ```
 
    Without the cookie, both return `401`.
@@ -298,7 +315,8 @@ my_prescription_app/
 │   │   │   ├── firebase.ts   # Firebase initialization
 │   │   │   ├── prescriptions.ts # Prescription operations
 │   │   │   └── errors.ts     # Error handling
-│   │   ├── validation.ts     # Data validation
+│   │   ├── schemas.ts        # Zod schemas shared by client and server
+│   │   ├── validation.ts     # QR parsing + form validation (built on schemas.ts)
 │   │   └── stats.ts          # Statistics computation
 │   └── types/                # TypeScript type definitions
 │       └── prescription.ts   # Prescription types

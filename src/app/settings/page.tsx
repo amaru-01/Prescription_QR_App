@@ -5,7 +5,7 @@ import { requirePageUser } from "@/lib/server/auth";
 
 export const metadata: Metadata = {
   title: "Settings",
-  description: "Profile shell, dark mode, backend status, exports, offline queue, and install options.",
+  description: "Account, dark mode, connection status, exports, and install options.",
 };
 
 export default async function SettingsPage() {
