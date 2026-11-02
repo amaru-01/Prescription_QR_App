@@ -1,9 +1,9 @@
 import admin from "firebase-admin";
+import { BackendError } from "./errors";
 import { getDb } from "./firebase";
 import type {
   HealthResponse,
   Prescription,
-  PrescriptionDraft,
   PrescriptionInput,
   PrescriptionStatus,
   PrescriptionUpdate,
@@ -11,12 +11,49 @@ import type {
 
 const DATA_MODE: HealthResponse["mode"] = "fastapi";
 
+/** Hard cap on how many records a single list request can read. */
+export const MAX_LIST_LIMIT = 500;
+
+/** Firestore gRPC status code for a missing document. */
+const NOT_FOUND_CODE = 5;
+
+/**
+ * Prescriptions are stored per user at `users/{uid}/prescriptions/{id}`, so
+ * every query is scoped to its owner by path and one user can never reach
+ * another user's records by guessing an id.
+ */
+function userPrescriptions(uid: string) {
+  if (!uid) throw new BackendError("Please log in to continue.", 401);
+  return getDb().collection("users").doc(uid).collection("prescriptions");
+}
+
+function toIso(value: unknown): string | null {
+  if (!value) return null;
+  const timestamp = value as { toDate?: () => Date; _seconds?: number };
+  if (typeof timestamp.toDate === "function") return timestamp.toDate().toISOString();
+  if (typeof timestamp._seconds === "number") return new Date(timestamp._seconds * 1000).toISOString();
+  return null;
+}
+
+function toPrescription(id: string, data: admin.firestore.DocumentData | undefined): Prescription {
+  return {
+    id,
+    med: data?.med || "",
+    dose: data?.dose || "",
+    duration: data?.duration || "",
+    createdAt: toIso(data?.created_at),
+    status: (data?.status || "active") as PrescriptionStatus,
+    source: (data?.source || "scan") as Prescription["source"],
+    notes: data?.notes || null,
+  };
+}
+
 /**
  * Get health status - mirrors FastAPI /health endpoint.
  */
 export async function getHealth(): Promise<HealthResponse> {
   try {
-    const db = getDb();
+    getDb();
     const timestamp = new Date().toISOString();
 
     return {
@@ -27,7 +64,7 @@ export async function getHealth(): Promise<HealthResponse> {
       mode: DATA_MODE,
       storage: "firebase",
     };
-  } catch (error) {
+  } catch {
     const timestamp = new Date().toISOString();
     return {
       ok: false,
@@ -41,56 +78,28 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 /**
- * List prescriptions from Firestore - mirrors FastAPI /api/prescriptions endpoint.
+ * List the user's prescriptions, newest first.
  */
-export async function listPrescriptions(limit = 100): Promise<Prescription[]> {
-  const db = getDb();
-
-  const snapshot = await db
-    .collection("prescriptions")
+export async function listPrescriptions(uid: string, limit = 100): Promise<Prescription[]> {
+  const snapshot = await userPrescriptions(uid)
     .orderBy("created_at", "desc")
-    .limit(limit)
+    .limit(Math.min(Math.max(1, limit), MAX_LIST_LIMIT))
     .get();
 
-  return snapshot.docs.map((doc) => {
-    const data = doc.data();
-    const createdAt = data.created_at;
-    let createdAtIso: string | null = null;
-
-    if (createdAt) {
-      if (typeof createdAt.toDate === "function") {
-        createdAtIso = createdAt.toDate().toISOString();
-      } else if (createdAt._seconds) {
-        createdAtIso = new Date(createdAt._seconds * 1000).toISOString();
-      }
-    }
-
-    return {
-      id: doc.id,
-      med: data.med || "",
-      dose: data.dose || "",
-      duration: data.duration || "",
-      createdAt: createdAtIso,
-      status: (data.status || "active") as PrescriptionStatus,
-      source: (data.source || "scan") as Prescription["source"],
-      notes: data.notes || null,
-    };
-  });
+  return snapshot.docs.map((doc) => toPrescription(doc.id, doc.data()));
 }
 
 /**
- * Save prescription to Firestore - mirrors FastAPI /api/save endpoint.
+ * Save a prescription for the user.
  */
 export async function savePrescription(
+  uid: string,
   input: PrescriptionInput,
   options?: {
     source?: Prescription["source"];
     notes?: string | null;
-    userAgent?: string | null;
   }
 ): Promise<{ documentId: string; prescription: Prescription }> {
-  const db = getDb();
-
   const prescriptionData = {
     med: input.med,
     dose: input.dose,
@@ -99,97 +108,79 @@ export async function savePrescription(
     source: options?.source || "scan",
     notes: options?.notes || null,
     created_at: admin.firestore.FieldValue.serverTimestamp(),
-    user_agent: options?.userAgent || null,
   };
 
-  const docRef = await db.collection("prescriptions").add(prescriptionData);
-
-  // Fetch the created document to return full data
-  const doc = await docRef.get();
-  const data = doc.data();
+  const docRef = await userPrescriptions(uid).add(prescriptionData);
 
   return {
-    documentId: doc.id,
+    documentId: docRef.id,
     prescription: {
-      id: doc.id,
-      med: data?.med || "",
-      dose: data?.dose || "",
-      duration: data?.duration || "",
+      id: docRef.id,
+      med: prescriptionData.med,
+      dose: prescriptionData.dose,
+      duration: prescriptionData.duration,
       createdAt: new Date().toISOString(),
-      status: (data?.status || "active") as PrescriptionStatus,
-      source: (data?.source || "scan") as Prescription["source"],
-      notes: data?.notes || null,
+      status: prescriptionData.status,
+      source: prescriptionData.source,
+      notes: prescriptionData.notes,
     },
   };
 }
 
 /**
- * Get a single prescription by ID.
+ * Get one of the user's prescriptions by ID.
  */
-export async function getPrescriptionById(id: string): Promise<Prescription> {
-  const db = getDb();
-
-  const doc = await db.collection("prescriptions").doc(id).get();
+export async function getPrescriptionById(uid: string, id: string): Promise<Prescription> {
+  const doc = await userPrescriptions(uid).doc(id).get();
 
   if (!doc.exists) {
-    throw new Error("Prescription not found");
+    throw new BackendError("Prescription not found.", 404);
   }
 
-  const data = doc.data();
-  const createdAt = data?.created_at;
-  let createdAtIso: string | null = null;
-
-  if (createdAt) {
-    if (typeof createdAt.toDate === "function") {
-      createdAtIso = createdAt.toDate().toISOString();
-    } else if (createdAt._seconds) {
-      createdAtIso = new Date(createdAt._seconds * 1000).toISOString();
-    }
-  }
-
-  return {
-    id: doc.id,
-    med: data?.med || "",
-    dose: data?.dose || "",
-    duration: data?.duration || "",
-    createdAt: createdAtIso,
-    status: (data?.status || "active") as PrescriptionStatus,
-    source: (data?.source || "scan") as Prescription["source"],
-    notes: data?.notes || null,
-  };
+  return toPrescription(doc.id, doc.data());
 }
 
 /** Update the supported editable prescription fields. */
-export async function updatePrescription(id: string, updates: PrescriptionUpdate): Promise<void> {
-  const db = getDb();
-
-  await db.collection("prescriptions").doc(id).update({
-    ...updates,
-    updated_at: admin.firestore.FieldValue.serverTimestamp(),
-  });
+export async function updatePrescription(uid: string, id: string, updates: PrescriptionUpdate): Promise<void> {
+  try {
+    await userPrescriptions(uid).doc(id).update({
+      ...updates,
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === NOT_FOUND_CODE) {
+      throw new BackendError("Prescription not found.", 404);
+    }
+    throw error;
+  }
 }
 
 /**
- * Delete a prescription.
+ * Delete one of the user's prescriptions.
  */
-export async function deletePrescription(id: string): Promise<void> {
-  const db = getDb();
-
-  await db.collection("prescriptions").doc(id).delete();
+export async function deletePrescription(uid: string, id: string): Promise<void> {
+  const ref = userPrescriptions(uid).doc(id);
+  const doc = await ref.get();
+  if (!doc.exists) {
+    throw new BackendError("Prescription not found.", 404);
+  }
+  await ref.delete();
 }
 
 /**
- * Seed demo prescriptions - not used in Firebase mode.
+ * Quote a CSV field per RFC 4180 and neutralise spreadsheet formulas, so a
+ * crafted QR payload like `=HYPERLINK(...)` is shown as text, not executed.
  */
-export async function seedDemoPrescriptions(): Promise<number> {
-  throw new Error("Demo seeding is not available in Firebase mode");
+function csvField(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 /**
- * Export prescriptions as CSV.
+ * Export the user's prescriptions as CSV.
  */
-export async function exportPrescriptions(): Promise<string> {
-  const prescriptions = await listPrescriptions(1000);
+export async function exportPrescriptions(uid: string): Promise<string> {
+  const prescriptions = await listPrescriptions(uid, MAX_LIST_LIMIT);
 
   const headers = ["ID", "Medication", "Dosage", "Duration", "Status", "Source", "Notes", "Created At"];
   const rows = prescriptions.map((p) => [
@@ -203,6 +194,5 @@ export async function exportPrescriptions(): Promise<string> {
     p.createdAt || "",
   ]);
 
-  const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
-  return csv;
+  return [headers, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
 }

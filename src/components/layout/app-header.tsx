@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { BrandLockup } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { useProfile } from "@/hooks/use-profile";
+import { useSession } from "@/hooks/use-session";
 import { initialsFor } from "@/lib/format";
 
 const NAV_LINKS = [
@@ -18,7 +18,7 @@ const NAV_LINKS = [
 
 export function AppHeader() {
   const pathname = usePathname();
-  const { profile, hydrated } = useProfile();
+  const { user, displayName } = useSession();
 
   return (
     <header className="no-print sticky top-0 z-50 border-b border-line/80 bg-canvas/85 backdrop-blur-xl">
@@ -46,18 +46,21 @@ export function AppHeader() {
         <div className="flex items-center gap-2">
           <ThemeToggle />
 
-          {hydrated && !profile.signedIn ? (
-            <Link href="/login" className="btn btn-primary hidden min-h-10 px-4 text-sm sm:inline-flex">
-              Log in
+          {!user || user.isAnonymous ? (
+            <Link
+              href={user ? "/signup" : "/login"}
+              className="btn btn-primary hidden min-h-10 px-4 text-sm sm:inline-flex"
+            >
+              {user ? "Create account" : "Log in"}
             </Link>
           ) : null}
 
           <Link
-            href={hydrated && !profile.signedIn ? "/login" : "/settings"}
+            href={user ? "/settings" : "/login"}
             className="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-xs font-bold text-brand-strong transition hover:border-brand"
-            aria-label={`Profile settings for ${hydrated ? profile.name : "guest"}`}
+            aria-label={user ? `Profile settings for ${displayName}` : "Log in"}
           >
-            {initialsFor(hydrated ? profile.name : "Guest tester")}
+            {initialsFor(displayName)}
           </Link>
         </div>
       </div>

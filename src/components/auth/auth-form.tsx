@@ -19,36 +19,29 @@ import {
 } from "lucide-react";
 
 import { BrandMark } from "@/components/brand";
-import { useProfile } from "@/hooks/use-profile";
 import { useToast } from "@/hooks/use-toasts";
+import {
+  authErrorMessage,
+  requestPasswordReset,
+  signInAsGuest,
+  signInWithEmail,
+  signUpWithEmail,
+} from "@/lib/auth-client";
 
 type Mode = "login" | "signup";
 
-interface StoredAccount {
-  name: string;
-  email: string;
-  passwordHash: string;
-}
-
-const ACCOUNTS_KEY = "veridose.accounts";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-async function hash(value: string): Promise<string> {
-  const data = new TextEncoder().encode(`veridose:${value}`);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function readAccounts(): StoredAccount[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(ACCOUNTS_KEY) ?? "[]");
-    return Array.isArray(parsed) ? (parsed as StoredAccount[]) : [];
-  } catch {
-    return [];
-  }
-}
+/** Firebase error codes that point at a specific form field. */
+const FIELD_FOR_CODE: Record<string, string> = {
+  "auth/invalid-email": "email",
+  "auth/email-already-in-use": "email",
+  "auth/invalid-credential": "password",
+  "auth/wrong-password": "password",
+  "auth/user-not-found": "password",
+  "auth/weak-password": "password",
+  "auth/password-does-not-meet-requirements": "password",
+};
 
 function strengthOf(password: string): { score: number; label: string } {
   let score = 0;
@@ -69,11 +62,10 @@ const PERKS = [
   { icon: BellRing, title: "Stay on track", copy: "Reminders and adherence at a glance." },
 ];
 
-export function AuthForm({ mode }: { mode: Mode }) {
+export function AuthForm({ mode, next = "/" }: { mode: Mode; next?: string }) {
   const isSignup = mode === "signup";
   const router = useRouter();
   const { toast } = useToast();
-  const { saveProfile } = useProfile();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -97,15 +89,20 @@ export function AuthForm({ mode }: { mode: Mode }) {
     if (first) document.getElementById(`auth-${first}`)?.focus();
   };
 
-  const finish = (displayName: string, mail: string) => {
-    saveProfile({ name: displayName, email: mail, signedIn: true });
+  const finish = (destination: string, title: string, description: string) => {
     setSuccess(true);
-    toast({
-      title: isSignup ? `Welcome, ${displayName.split(" ")[0]}!` : `Welcome back, ${displayName.split(" ")[0]}`,
-      description: isSignup ? "Your account is ready on this device." : "You're signed in.",
-      variant: "success",
-    });
-    window.setTimeout(() => router.push(isSignup ? "/scan" : "/"), 1100);
+    toast({ title, description, variant: "success" });
+    window.setTimeout(() => {
+      router.replace(destination);
+      router.refresh();
+    }, 900);
+  };
+
+  const failWith = (error: unknown) => {
+    const message = authErrorMessage(error);
+    const code = (error as { code?: unknown })?.code;
+    const field = typeof code === "string" ? FIELD_FOR_CODE[code] : undefined;
+    fail(message, field ? { [field]: message } : {});
   };
 
   const submit = async (event: FormEvent) => {
@@ -117,6 +114,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     if (isSignup && name.trim().length < 2) fieldErrors.name = "Enter your name (at least 2 characters).";
     if (!EMAIL_RE.test(mail)) fieldErrors.email = "Enter a valid email address.";
     if (isSignup && password.length < 8) fieldErrors.password = "Use at least 8 characters.";
+    else if (isSignup && strength.score < 2) fieldErrors.password = "Add length, mixed case, numbers or symbols.";
     if (!isSignup && !password) fieldErrors.password = "Enter your password.";
     if (isSignup && confirm !== password) fieldErrors.confirm = "Passwords do not match.";
     if (isSignup && !agree) fieldErrors.agree = "Please accept the testing terms.";
@@ -124,37 +122,55 @@ export function AuthForm({ mode }: { mode: Mode }) {
     if (Object.keys(fieldErrors).length) return fail("Please fix the highlighted fields.", fieldErrors);
 
     setBusy(true);
-    await new Promise((resolve) => setTimeout(resolve, 650));
     try {
-      const accounts = readAccounts();
-      const passwordHash = await hash(password);
       if (isSignup) {
-        if (accounts.some((account) => account.email === mail)) {
-          return fail("An account with this email already exists. Try logging in.", { email: "Email already registered." });
-        }
-        window.localStorage.setItem(
-          ACCOUNTS_KEY,
-          JSON.stringify([...accounts, { name: name.trim(), email: mail, passwordHash }]),
+        const displayName = name.trim();
+        await signUpWithEmail(displayName, mail, password);
+        finish(
+          next === "/" ? "/scan" : next,
+          `Welcome, ${displayName.split(" ")[0]}!`,
+          "We sent you an email to verify your address.",
         );
-        finish(name.trim(), mail);
       } else {
-        const account = accounts.find((item) => item.email === mail);
-        if (!account || account.passwordHash !== passwordHash) {
-          return fail("That email and password don't match. Check them or create an account.", {
-            password: "Incorrect email or password.",
-          });
-        }
-        finish(account.name, account.email);
+        await signInWithEmail(mail, password);
+        finish(next, "Welcome back", "You're signed in.");
       }
+    } catch (error) {
+      failWith(error);
     } finally {
       setBusy(false);
     }
   };
 
-  const guest = () => {
-    saveProfile({ name: "Guest tester", email: "", signedIn: false });
-    toast({ title: "Continuing as guest", variant: "info" });
-    router.push("/");
+  const guest = async () => {
+    setFormError(null);
+    setBusy(true);
+    try {
+      await signInAsGuest();
+      finish(next, "Continuing as guest", "Guest records stay private, but are lost when you sign out.");
+    } catch (error) {
+      failWith(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    const mail = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(mail)) {
+      fail("Enter your email above, then choose “Forgot password?” again.", { email: "Enter a valid email address." });
+      return;
+    }
+    try {
+      await requestPasswordReset(mail);
+      toast({
+        title: "Check your inbox",
+        description: "If an account exists for that email, we've sent a password reset link.",
+        variant: "success",
+      });
+    } catch (error) {
+      failWith(error);
+    }
   };
 
   const inputWrap = (field: string) =>
@@ -288,7 +304,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
                   <div className="mb-1.5 flex items-center justify-between">
                     <label htmlFor="auth-password" className="text-sm font-semibold text-ink">Password</label>
                     {!isSignup ? (
-                      <button type="button" onClick={() => toast({ title: "Password reset", description: "Password reset is not available yet. You can continue as a guest.", variant: "info" })} className="text-xs font-semibold text-brand-strong hover:underline">
+                      <button type="button" onClick={() => void resetPassword()} className="text-xs font-semibold text-brand-strong hover:underline">
                         Forgot password?
                       </button>
                     ) : null}
@@ -348,7 +364,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
                 <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
               </div>
 
-              <button type="button" onClick={guest} className="btn btn-secondary min-h-12 w-full">
+              <button type="button" onClick={() => void guest()} disabled={busy} className="btn btn-secondary min-h-12 w-full">
                 <Sparkles className="size-4 text-accent" aria-hidden />
                 Continue as guest
               </button>
@@ -361,7 +377,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
               </p>
               <p className="mt-3 flex items-start justify-center gap-1.5 text-center text-[0.7rem] leading-relaxed text-muted">
                 <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
-                Your account details are protected and kept on this device.
+                Sign-in is handled by Firebase Authentication. Your records are private to your account.
               </p>
             </div>
           )}

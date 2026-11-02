@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { ScanFlow } from "@/components/scan/scan-flow";
+import { requirePageUser } from "@/lib/server/auth";
 
 export const metadata: Metadata = {
   title: "Scan a prescription",
@@ -38,7 +39,9 @@ const SCAN_TIPS = [
   },
 ] as const;
 
-export default function ScanPage() {
+export default async function ScanPage() {
+  await requirePageUser("/scan");
+
   return (
     <div className="space-y-5 pb-6">
       <div className="no-print flex items-center justify-between gap-3">

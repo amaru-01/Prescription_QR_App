@@ -16,9 +16,10 @@ import {
 
 import { ExportActions } from "@/components/export-actions";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { useProfile } from "@/hooks/use-profile";
+import { useSession } from "@/hooks/use-session";
 import { useToast } from "@/hooks/use-toasts";
-import { prescriptionApi } from "@/lib/api";
+import { accountApi, prescriptionApi } from "@/lib/api";
+import { signOutSession } from "@/lib/auth-client";
 import { initialsFor } from "@/lib/format";
 import type { HealthResponse } from "@/types/prescription";
 
@@ -30,21 +31,16 @@ interface BeforeInstallPromptEvent extends Event {
 export function SettingsView() {
   const router = useRouter();
   const { toast } = useToast();
-  const { profile, hydrated, saveProfile } = useProfile();
+  const { user, displayName } = useSession();
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(user?.name ?? "");
+  const [savingName, setSavingName] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installing, setInstalling] = useState(false);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    setName(profile.name === "Guest tester" ? "" : profile.name);
-    setEmail(profile.email);
-  }, [hydrated, profile.email, profile.name]);
 
   const checkHealth = async () => {
     setChecking(true);
@@ -71,20 +67,37 @@ export function SettingsView() {
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
 
-  const saveProfile_ = () => {
-    saveProfile({
-      name: name.trim() || "Guest tester",
-      email: email.trim(),
-      signedIn: profile.signedIn,
-    });
-    toast({ title: "Profile saved on this device", variant: "success" });
+  const saveName = async () => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      toast({ title: "Enter at least 2 characters", variant: "error" });
+      return;
+    }
+    setSavingName(true);
+    try {
+      await accountApi.updateName(trimmed);
+      toast({ title: "Name updated", variant: "success" });
+      router.refresh();
+    } catch (error) {
+      toast({ title: "Could not update your name", description: error instanceof Error ? error.message : undefined, variant: "error" });
+    } finally {
+      setSavingName(false);
+    }
   };
 
-  const signOut = () => {
-    saveProfile({ name: "Guest tester", email: "", signedIn: false });
-    setName("");
-    setEmail("");
-    toast({ title: "Signed out of the demo session", variant: "success" });
+  const signOut = async (everywhere = false) => {
+    if (user?.isAnonymous && !window.confirm("Guest records can't be recovered after you sign out. Sign out anyway?")) return;
+    if (everywhere && !window.confirm("Sign out of VeriDose on every device, including this one?")) return;
+    setSigningOut(true);
+    try {
+      await signOutSession({ everywhere });
+      toast({ title: everywhere ? "Signed out on all devices" : "Signed out", variant: "success" });
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      toast({ title: "Could not sign out", description: "Check your connection and try again.", variant: "error" });
+      setSigningOut(false);
+    }
   };
 
   const install = async () => {
@@ -145,68 +158,86 @@ export function SettingsView() {
               <h2 id="account-title" className="text-sm font-bold text-ink">Your account</h2>
               <p className="text-xs text-muted">Update your name and sign-in details.</p>
             </div>
-            {profile.signedIn ? (
-              <span className="chip ml-auto border-brand/30 bg-brand-soft text-brand-strong">
-                <CheckCircle2 className="size-3" aria-hidden /> Signed in
+            {user && !user.isAnonymous ? (
+              <span
+                className={`chip ml-auto ${user.emailVerified ? "border-brand/30 bg-brand-soft text-brand-strong" : ""}`}
+              >
+                <CheckCircle2 className="size-3" aria-hidden /> {user.emailVerified ? "Verified" : "Email not verified"}
               </span>
+            ) : user ? (
+              <span className="chip ml-auto">Guest</span>
             ) : null}
           </div>
 
           <div className="mt-4 flex items-center gap-3">
             <span className="flex size-12 items-center justify-center rounded-full bg-elevated text-sm font-extrabold text-ink">
-              {initialsFor(hydrated ? profile.name : "Guest tester")}
+              {initialsFor(displayName)}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-ink">{hydrated ? profile.name : "Guest tester"}</p>
-              <p className="truncate text-xs text-muted">{profile.email || "No account connected"}</p>
+              <p className="truncate text-sm font-bold text-ink">{displayName}</p>
+              <p className="truncate text-xs text-muted">
+                {user?.isAnonymous ? "Guest session" : user?.email || "No account connected"}
+              </p>
             </div>
           </div>
 
           <div className="mt-4 space-y-3">
-            <div>
-              <label htmlFor="profile-name" className="mb-1.5 block text-xs font-semibold text-ink">Display name</label>
-              <input
-                id="profile-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Alex Rivera"
-                autoComplete="name"
-                className="field"
-                maxLength={60}
-              />
-            </div>
-            <div>
-              <label htmlFor="profile-email" className="mb-1.5 block text-xs font-semibold text-ink">Email</label>
-              <input
-                id="profile-email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="alex@example.com"
-                autoComplete="email"
-                className="field"
-                maxLength={120}
-              />
-            </div>
+            {user && !user.isAnonymous ? (
+              <div>
+                <label htmlFor="profile-name" className="mb-1.5 block text-xs font-semibold text-ink">Display name</label>
+                <input
+                  id="profile-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Alex Rivera"
+                  autoComplete="name"
+                  className="field"
+                  maxLength={60}
+                />
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={saveProfile_} className="btn btn-secondary min-h-11 px-3.5 text-sm">
-                Save profile
-              </button>
-              {profile.signedIn ? (
-                <button type="button" onClick={signOut} className="btn btn-ghost min-h-11 px-3 text-sm">
+              {user && !user.isAnonymous ? (
+                <button
+                  type="button"
+                  onClick={() => void saveName()}
+                  disabled={savingName}
+                  className="btn btn-secondary min-h-11 px-3.5 text-sm"
+                >
+                  {savingName ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                  Save name
+                </button>
+              ) : (
+                <Link href="/signup" className="btn btn-primary min-h-11 px-3.5 text-sm">
+                  Create an account
+                </Link>
+              )}
+              {user ? (
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  disabled={signingOut}
+                  className="btn btn-ghost min-h-11 px-3 text-sm"
+                >
                   <LogOut className="size-4" aria-hidden />
                   Sign out
                 </button>
-              ) : (
-                <>
-                  <Link href="/login" className="btn btn-primary min-h-11 px-3.5 text-sm">
-                    Log in / Sign up
-                  </Link>
-                </>
-              )}
+              ) : null}
+              {user && !user.isAnonymous ? (
+                <button
+                  type="button"
+                  onClick={() => void signOut(true)}
+                  disabled={signingOut}
+                  className="btn btn-ghost min-h-11 px-3 text-sm"
+                >
+                  Sign out of all devices
+                </button>
+              ) : null}
             </div>
             <p className="rounded-xl border border-line bg-elevated/60 p-2.5 text-[0.7rem] leading-relaxed text-muted">
-              Your display name and preferences are kept private on this device.
+              {user?.isAnonymous
+                ? "Guest records are private to this session and can't be recovered after you sign out. Create an account to keep them long term."
+                : "Your prescriptions are stored privately in your account. Only you can see them when signed in."}
             </p>
           </div>
         </section>
@@ -280,7 +311,7 @@ export function SettingsView() {
                   ? "This will only take a moment."
                   : health?.ok
                     ? "Your prescription history is up to date."
-                    : "You can still scan and save. We'll sync your changes when the connection returns."}
+                    : "Saving needs a connection. Try again once you're back online."}
               </p>
             </div>
           </div>
