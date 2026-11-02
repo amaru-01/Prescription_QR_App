@@ -9,21 +9,24 @@
     "typecheck": "tsc --noEmit",
     "migrate:prescriptions": "node scripts/migrate-prescriptions.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate:keys": "node scripts/generate-keys.mjs",
+    "set-role": "node scripts/set-role.mjs"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
     "@types/qrcode": "^1.5.6",
     "dotenv": "17.3.1",
-    "firebase": "^12.19.0",
-    "firebase-admin": "^12.0.0",
+    "firebase": "^13.2.0",
+    "firebase-admin": "^14.5.0",
     "jsqr": "^1.4.0",
     "lucide-react": "^1.61.0",
     "next": "16.4.4",
     "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
+    "web-push": "^3.6.7",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -31,11 +34,20 @@
     "@types/node": "22.19.15",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/web-push": "^3.6.4",
     "eslint": "9.39.4",
     "eslint-config-next": "16.4.4",
     "postcss": "8.5.8",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "overrides": {
+    "@firebase/firestore": {
+      "@grpc/grpc-js": "^1.14.7"
+    }
   }
 }

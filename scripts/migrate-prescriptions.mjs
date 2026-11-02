@@ -14,7 +14,9 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
-import admin from "firebase-admin";
+import { cert, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -58,11 +60,11 @@ async function main() {
     process.exit(1);
   }
 
-  admin.initializeApp({ credential: admin.credential.cert(loadServiceAccount()) });
-  const db = admin.firestore();
+  initializeApp({ credential: cert(loadServiceAccount()) });
+  const db = getFirestore();
 
-  if (!uid) uid = (await admin.auth().getUserByEmail(email)).uid;
-  const user = await admin.auth().getUser(uid);
+  if (!uid) uid = (await getAuth().getUserByEmail(email)).uid;
+  const user = await getAuth().getUser(uid);
   console.log(`Target account: ${user.email ?? "(no email)"} [${uid}]`);
 
   const legacy = await db.collection("prescriptions").get();

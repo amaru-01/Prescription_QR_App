@@ -40,7 +40,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
-      # Fails on critical advisories in shipped dependencies. High/moderate
-      # Firebase advisories need major upgrades and are tracked separately.
+      # Fails on high or critical advisories in shipped dependencies. The remaining
+      # moderate ones are transitive deps of firebase-admin awaiting an upstream fix.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=critical
+        run: npm audit --omit=dev --audit-level=high

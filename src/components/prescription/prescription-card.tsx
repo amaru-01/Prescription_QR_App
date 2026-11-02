@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Clock3, Pill } from "lucide-react";
 
+import { VerifiedBadge } from "@/components/prescription/verification";
 import { SourceBadge, StatusBadge } from "@/components/ui/badges";
 import { formatDateTime, formatRelative, initialsFor } from "@/lib/format";
 import type { Prescription } from "@/types/prescription";
@@ -26,7 +27,7 @@ export function PrescriptionCard({
   prescription: Prescription;
   showActions?: boolean;
 }) {
-  const { id, med, dose, duration, createdAt, status, source } = prescription;
+  const { id, med, dose, duration, createdAt, status, source, verification } = prescription;
 
   return (
     <article className="card group relative flex h-full flex-col gap-4 p-4 transition hover:-translate-y-0.5 hover:border-brand/40 sm:p-5">
@@ -59,6 +60,7 @@ export function PrescriptionCard({
 
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
+          {verification ? <VerifiedBadge verification={verification} /> : null}
           <SourceBadge source={source} />
           <span className="text-[0.7rem] font-medium text-muted" title={formatDateTime(createdAt)} suppressHydrationWarning>
             Saved {formatRelative(createdAt)}

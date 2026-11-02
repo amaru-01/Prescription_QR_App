@@ -26,7 +26,7 @@ export function AppHeader() {
         <BrandLockup />
 
         <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
-          {NAV_LINKS.map((link) => {
+          {[...NAV_LINKS, ...(user?.role === "prescriber" ? [{ href: "/prescribe", label: "Prescribe" }] : [])].map((link) => {
             const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
             return (
               <Link

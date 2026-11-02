@@ -12,6 +12,7 @@ const record: Prescription = {
   status: "active",
   source: "scan",
   notes: null,
+  verification: null,
 };
 
 describe("csvField", () => {
@@ -62,6 +63,7 @@ describe("toPrescription", () => {
       status: "active",
       source: "scan",
       notes: null,
+      verification: null,
     });
   });
 

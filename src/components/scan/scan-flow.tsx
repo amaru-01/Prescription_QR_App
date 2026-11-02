@@ -18,11 +18,12 @@ import { ManualEntry } from "@/components/scan/manual-entry";
 import { QrCamera } from "@/components/scan/qr-camera";
 import { QrUploader } from "@/components/scan/qr-uploader";
 import { ScanPreview } from "@/components/scan/scan-preview";
+import { RX_REASON_TEXT, VerifiedBadge } from "@/components/prescription/verification";
 import { SourceBadge } from "@/components/ui/badges";
 import { Confetti } from "@/components/motion";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useToast } from "@/hooks/use-toasts";
-import { prescriptionApi } from "@/lib/api";
+import { prescriptionApi, rxApi } from "@/lib/api";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { parsePrescriptionPayload, validatePrescription } from "@/lib/validation";
 import type {
@@ -31,6 +32,7 @@ import type {
   PrescriptionFieldErrors,
   PrescriptionInput,
   PrescriptionSource,
+  RxCheck,
 } from "@/types/prescription";
 
 type Stage = "capture" | "review" | "saved";
@@ -91,6 +93,9 @@ export function ScanFlow() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedRecord, setSavedRecord] = useState<Prescription | null>(null);
+  /** Signature check for a prescriber-signed code, and the fields as signed. */
+  const [rxCheck, setRxCheck] = useState<RxCheck | "checking">({ status: "none" });
+  const [signedFields, setSignedFields] = useState<PrescriptionInput | null>(null);
 
   const { toast } = useToast();
   const online = useOnlineStatus();
@@ -111,8 +116,21 @@ export function ScanFlow() {
       setErrors({});
       setFormError(null);
       setWarnings(parsed.warnings);
-      setDraft({ ...parsed.value, source, notes: "" });
+      setDraft({ ...parsed.value, source, notes: "", ...(parsed.rx ? { rx: parsed.rx } : {}) });
       setStage("review");
+      if (parsed.rx) {
+        const signed = parsed.value;
+        setSignedFields(signed);
+        setRxCheck("checking");
+        rxApi
+          .verify({ ...signed, rx: parsed.rx })
+          .then(setRxCheck)
+          // The save repeats the check, so a failed preview check only hides the banner.
+          .catch(() => setRxCheck({ status: "none" }));
+      } else {
+        setSignedFields(null);
+        setRxCheck({ status: "none" });
+      }
       toast({ title: "QR code parsed", description: "Review the details before saving.", variant: "success" });
     },
     [toast],
@@ -123,6 +141,8 @@ export function ScanFlow() {
     setFormError(null);
     setWarnings([]);
     setDraft({ ...input, source: "manual", notes: "" });
+    setSignedFields(null);
+    setRxCheck({ status: "none" });
     setStage("review");
   }, []);
 
@@ -145,6 +165,7 @@ export function ScanFlow() {
       ...validation.value,
       source: draft.source,
       notes: draft.notes?.trim() ? draft.notes.trim() : null,
+      ...(draft.rx ? { rx: draft.rx } : {}),
     };
 
     setSaving(true);
@@ -156,11 +177,26 @@ export function ScanFlow() {
       setSavedRecord(result.prescription);
       setStage("saved");
       window.dispatchEvent(new Event("veridose:data-changed"));
-      toast({
-        title: "Prescription saved",
-        description: `${result.prescription.med} ${result.prescription.dose} added to your history.`,
-        variant: "success",
-      });
+      if (result.rx.status === "verified") {
+        toast({
+          title: "Verified prescription saved",
+          description: `Signed by ${result.rx.prescriberName}.`,
+          variant: "success",
+        });
+      } else if (result.rx.status === "invalid") {
+        toast({
+          title: "Saved as unverified",
+          description: RX_REASON_TEXT[result.rx.reason],
+          variant: "info",
+          duration: 8000,
+        });
+      } else {
+        toast({
+          title: "Prescription saved",
+          description: `${result.prescription.med} ${result.prescription.dose} added to your history.`,
+          variant: "success",
+        });
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Something unexpected happened. Please try again.");
       toast({ title: "Could not save", description: error instanceof Error ? error.message : "Unknown error", variant: "error" });
@@ -173,6 +209,8 @@ export function ScanFlow() {
     setStage("capture");
     setDraft(null);
     setSavedRecord(null);
+    setSignedFields(null);
+    setRxCheck({ status: "none" });
     setWarnings([]);
     setErrors({});
     setFormError(null);
@@ -269,6 +307,13 @@ export function ScanFlow() {
             errors={errors}
             warnings={warnings}
             formError={formError}
+            rxCheck={rxCheck}
+            edited={
+              signedFields !== null &&
+              (draft.med.trim() !== signedFields.med ||
+                draft.dose.trim() !== signedFields.dose ||
+                draft.duration.trim() !== signedFields.duration)
+            }
             saving={saving}
             onChange={(patch) => setDraft((current) => (current ? { ...current, ...patch } : current))}
             onSave={() => void save()}
@@ -302,7 +347,10 @@ export function ScanFlow() {
                     {savedRecord.dose} · {savedRecord.duration}
                   </p>
                 </div>
-                <SourceBadge source={savedRecord.source} />
+                <div className="flex flex-wrap gap-1.5">
+                  {savedRecord.verification ? <VerifiedBadge verification={savedRecord.verification} /> : null}
+                  <SourceBadge source={savedRecord.source} />
+                </div>
               </div>
               {savedRecord.notes ? (
                 <p className="mt-2 text-xs leading-relaxed text-muted">{savedRecord.notes}</p>

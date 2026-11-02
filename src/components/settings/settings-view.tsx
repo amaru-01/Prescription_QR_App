@@ -125,17 +125,6 @@ export function SettingsView() {
     }
   };
 
-  const resetReminders = () => {
-    if (!window.confirm("Clear all reminder times and adherence history on this device?")) return;
-    try {
-      window.localStorage.removeItem("veridose.reminders");
-    } catch {
-      /* ignore */
-    }
-    toast({ title: "Reminder data cleared", variant: "info" });
-    router.refresh();
-  };
-
   const replayOnboarding = () => {
     try {
       window.localStorage.removeItem("veridose.onboarded");
@@ -243,6 +232,11 @@ export function SettingsView() {
                 </button>
               ) : null}
             </div>
+            {user?.role === "prescriber" ? (
+              <Link href="/prescribe" className="btn btn-secondary min-h-11 w-full text-sm">
+                Issue signed prescriptions
+              </Link>
+            ) : null}
             <p className="rounded-xl border border-line bg-elevated/60 p-2.5 text-[0.7rem] leading-relaxed text-muted">
               {user?.isAnonymous
                 ? "Guest records are private to this session and can't be recovered after you sign out. Create an account to keep them long term."
@@ -346,9 +340,6 @@ export function SettingsView() {
 
           <div className="mt-4 space-y-3">
             <ExportActions />
-            <button type="button" onClick={resetReminders} className="btn btn-ghost min-h-10 w-full text-xs">
-              Clear reminder data
-            </button>
           </div>
         </section>
       </div>

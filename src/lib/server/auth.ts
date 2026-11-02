@@ -50,6 +50,8 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
       name: user.displayName ?? null,
       emailVerified: user.emailVerified,
       isAnonymous: decoded.firebase?.sign_in_provider === "anonymous",
+      // Read from the fresh user record, so role changes apply on the next request.
+      role: user.customClaims?.role === "prescriber" ? "prescriber" : "patient",
     };
   } catch (error) {
     if (isAuthError(error)) return null;
@@ -61,6 +63,15 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) throw new BackendError("Please log in to continue.", 401);
+  return user;
+}
+
+/** For prescriber-only API routes: 401 when signed out, 403 for patients and guests. */
+export async function requirePrescriber(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.role !== "prescriber" || user.isAnonymous) {
+    throw new BackendError("Only prescriber accounts can do this.", 403);
+  }
   return user;
 }
 

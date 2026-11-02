@@ -1,10 +1,12 @@
-import admin from "firebase-admin";
+import { cert, getApps, initializeApp, type ServiceAccount } from "firebase-admin/app";
+import { getAuth, type Auth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import fs from "fs";
 import path from "path";
 
 import { logger } from "./logger";
 
-let db: admin.firestore.Firestore | null = null;
+let db: Firestore | null = null;
 
 /**
  * Load the service account credentials.
@@ -13,7 +15,7 @@ let db: admin.firestore.Firestore | null = null;
  * 2. Local development: a JSON file read at runtime with fs. The path is dynamic,
  *    so the bundler never tries to include the file in the build.
  */
-function loadServiceAccount(): admin.ServiceAccount {
+function loadServiceAccount(): ServiceAccount {
   const firebaseCredentialsJson = process.env.FIREBASE_CREDENTIALS;
 
   if (firebaseCredentialsJson) {
@@ -37,7 +39,9 @@ function loadServiceAccount(): admin.ServiceAccount {
   ].filter((p): p is string => Boolean(p));
 
   for (const candidate of candidates) {
-    const resolved = path.resolve(process.cwd(), candidate);
+    // turbopackIgnore: without it, this runtime path makes the bundler trace the whole
+    // project (including .env and key files) into the server output.
+    const resolved = path.resolve(/* turbopackIgnore: true */ process.cwd(), candidate);
     if (fs.existsSync(resolved)) {
       return JSON.parse(fs.readFileSync(resolved, "utf8"));
     }
@@ -52,21 +56,21 @@ function loadServiceAccount(): admin.ServiceAccount {
 /**
  * Initialize Firebase Admin SDK with credentials from environment or service account file.
  */
-export function initializeFirebase(): admin.firestore.Firestore {
+export function initializeFirebase(): Firestore {
   if (db) {
     return db;
   }
 
   try {
     // Check if Firebase is already initialized
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(loadServiceAccount()),
+    if (!getApps().length) {
+      initializeApp({
+        credential: cert(loadServiceAccount()),
       });
       logger.info("Firebase Admin SDK initialized");
     }
 
-    db = admin.firestore();
+    db = getFirestore();
     return db;
   } catch (error) {
     logger.error("Error initializing Firebase", { error });
@@ -81,7 +85,7 @@ export function initializeFirebase(): admin.firestore.Firestore {
 /**
  * Get Firestore client (initializes if needed).
  */
-export function getDb(): admin.firestore.Firestore {
+export function getDb(): Firestore {
   if (!db) {
     return initializeFirebase();
   }
@@ -91,7 +95,7 @@ export function getDb(): admin.firestore.Firestore {
 /**
  * Get the Firebase Admin Auth client (initializes the app if needed).
  */
-export function getAdminAuth(): admin.auth.Auth {
+export function getAdminAuth(): Auth {
   initializeFirebase();
-  return admin.auth();
+  return getAuth();
 }

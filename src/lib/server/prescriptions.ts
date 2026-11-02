@@ -1,4 +1,4 @@
-import admin from "firebase-admin";
+import { FieldValue, Timestamp, type DocumentData, type Query } from "firebase-admin/firestore";
 
 import { MAX_LIST_LIMIT } from "@/lib/schemas";
 import type { DashboardStats } from "@/lib/stats";
@@ -10,7 +10,11 @@ import type {
   PrescriptionInput,
   PrescriptionStatus,
   PrescriptionUpdate,
+  PrescriptionVerification,
+  RxCheck,
 } from "@/types/prescription";
+import { onPrescriptionDeleted, onPrescriptionStatusChanged } from "./reminders";
+import type { RxPayload } from "./rx-signing";
 
 export { MAX_LIST_LIMIT };
 
@@ -35,7 +39,7 @@ function toIso(value: unknown): string | null {
   return null;
 }
 
-export function toPrescription(id: string, data: admin.firestore.DocumentData | undefined): Prescription {
+export function toPrescription(id: string, data: DocumentData | undefined): Prescription {
   return {
     id,
     med: data?.med || "",
@@ -45,6 +49,17 @@ export function toPrescription(id: string, data: admin.firestore.DocumentData | 
     status: (data?.status || "active") as PrescriptionStatus,
     source: (data?.source || "scan") as Prescription["source"],
     notes: data?.notes || null,
+    verification: toVerification(data?.verification),
+  };
+}
+
+function toVerification(value: unknown): PrescriptionVerification | null {
+  const v = value as { rx_id?: unknown; prescriber_name?: unknown; issued_at?: unknown } | undefined;
+  if (!v || typeof v.rx_id !== "string") return null;
+  return {
+    rxId: v.rx_id,
+    prescriberName: typeof v.prescriber_name === "string" ? v.prescriber_name : "Prescriber",
+    issuedAt: toIso(v.issued_at) ?? "",
   };
 }
 
@@ -110,8 +125,8 @@ export async function listPrescriptions(uid: string, limit = 100): Promise<Presc
  */
 export async function getPrescriptionStats(uid: string): Promise<DashboardStats> {
   const collection = userPrescriptions(uid);
-  const weekAgo = admin.firestore.Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const count = async (query: admin.firestore.Query) => (await query.count().get()).data().count;
+  const weekAgo = Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const count = async (query: Query) => (await query.count().get()).data().count;
 
   const [total, active, completed, archived, thisWeek, meds] = await Promise.all([
     count(collection),
@@ -132,6 +147,11 @@ export async function getPrescriptionStats(uid: string): Promise<DashboardStats>
 
 /**
  * Save a prescription for the user.
+ *
+ * With `rx` (a signed QR payload the route has already verified and matched
+ * against the reviewed fields) the save also claims the prescription, in one
+ * transaction: the first account to save it gets a verified record; the same
+ * account saving it again gets a 409; anyone else's copy is stored unverified.
  */
 export async function savePrescription(
   uid: string,
@@ -139,31 +159,74 @@ export async function savePrescription(
   options?: {
     source?: Prescription["source"];
     notes?: string | null;
+    rx?: RxPayload;
   }
-): Promise<{ documentId: string; prescription: Prescription }> {
-  const prescriptionData = {
+): Promise<{ documentId: string; prescription: Prescription; rx: RxCheck }> {
+  const db = getDb();
+  const docRef = userPrescriptions(uid).doc();
+  const rx = options?.rx;
+
+  const base = {
     med: input.med,
     dose: input.dose,
     duration: input.duration,
     status: "active" as PrescriptionStatus,
     source: options?.source || "scan",
     notes: options?.notes || null,
-    created_at: admin.firestore.FieldValue.serverTimestamp(),
+    created_at: FieldValue.serverTimestamp(),
   };
 
-  const docRef = await userPrescriptions(uid).add(prescriptionData);
+  const rxCheck = await db.runTransaction(async (tx): Promise<RxCheck> => {
+    if (!rx) {
+      tx.set(docRef, { ...base, verification: null });
+      return { status: "none" };
+    }
+
+    const claimRef = db.collection("rx_claims").doc(rx.jti);
+    const claim = await tx.get(claimRef);
+    if (claim.exists) {
+      if (claim.get("uid") === uid) {
+        throw new BackendError("You've already saved this prescription.", 409);
+      }
+      tx.set(docRef, { ...base, verification: null });
+      return { status: "invalid", reason: "claimed" };
+    }
+
+    const issuedAt = Timestamp.fromMillis(rx.iat * 1000);
+    tx.create(claimRef, {
+      uid,
+      prescription_id: docRef.id,
+      prescriber_uid: rx.iss,
+      claimed_at: FieldValue.serverTimestamp(),
+    });
+    tx.set(
+      db.collection("users").doc(rx.iss).collection("issued").doc(rx.jti),
+      { claimed_at: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    tx.set(docRef, {
+      ...base,
+      verification: { rx_id: rx.jti, prescriber_uid: rx.iss, prescriber_name: rx.isn, issued_at: issuedAt },
+    });
+    return { status: "verified", prescriberName: rx.isn, issuedAt: issuedAt.toDate().toISOString(), matches: true };
+  });
 
   return {
     documentId: docRef.id,
+    rx: rxCheck,
     prescription: {
       id: docRef.id,
-      med: prescriptionData.med,
-      dose: prescriptionData.dose,
-      duration: prescriptionData.duration,
+      med: base.med,
+      dose: base.dose,
+      duration: base.duration,
       createdAt: new Date().toISOString(),
-      status: prescriptionData.status,
-      source: prescriptionData.source,
-      notes: prescriptionData.notes,
+      status: base.status,
+      source: base.source,
+      notes: base.notes,
+      verification:
+        rxCheck.status === "verified" && rx
+          ? { rxId: rx.jti, prescriberName: rx.isn, issuedAt: rxCheck.issuedAt }
+          : null,
     },
   };
 }
@@ -186,8 +249,9 @@ export async function updatePrescription(uid: string, id: string, updates: Presc
   try {
     await userPrescriptions(uid).doc(id).update({
       ...updates,
-      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: FieldValue.serverTimestamp(),
     });
+    if (updates.status) await onPrescriptionStatusChanged(uid, id, updates.status);
   } catch (error) {
     if ((error as { code?: unknown })?.code === NOT_FOUND_CODE) {
       throw new BackendError("Prescription not found.", 404);
@@ -206,6 +270,7 @@ export async function deletePrescription(uid: string, id: string): Promise<void>
     throw new BackendError("Prescription not found.", 404);
   }
   await ref.delete();
+  await onPrescriptionDeleted(uid, id);
 }
 
 /**

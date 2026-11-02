@@ -220,10 +220,11 @@ FIREBASE_CREDENTIALS='{"type":"service_account","project_id":"YOUR_PROJECT_ID",.
    - Verify the prescription data is displayed and saved to Firestore
    - Check Firebase Console to verify data is being saved
 
-### Step 3: Build for Production
+### Step 3: Run and build
 
 ```bash
-npm install
+npm run dev                  # http://localhost:3000
+npm run build && npm start   # production build
 ```
 
 ### Authentication & data access
@@ -250,21 +251,54 @@ npm run migrate:prescriptions -- --email you@example.com --apply    # copy
 npm run migrate:prescriptions -- --email you@example.com --apply --delete-originals
 ```
 
-### Step 4: Security Best Practices
+### Signed prescriptions (prescriber QR codes)
 
-```bash
-cp .env.example .env
-```
+Prescribers issue QR codes from **/prescribe**. Each code carries the plain `med`, `dose`
+and `duration` plus an `rx` token signed with an Ed25519 key that only the server holds.
+When a patient scans it:
 
-Edit `.env` with your Firebase project values.
+- the review screen shows **Verified prescription · signed by Dr …**, or explains why not
+  (altered, expired after 30 days, signed with an old key, already saved by someone else);
+- editing any signed field removes verification, and the record is saved unverified;
+- the first account to save a code claims it (one transaction), so a copied code cannot be
+  saved as verified by anyone else, and the prescriber sees "Saved by patient".
 
-### 3) Run the application
+Setup:
 
-```bash
-npm run dev
-```
+1. `npm run generate:keys` and put `RX_SIGNING_PRIVATE_KEY` in `.env` and your host's
+   environment settings (server-only secret).
+2. Grant prescriber access to accounts you have vetted:
+   `npm run set-role -- --email doctor@example.com --role prescriber`
+   (`--role patient` removes it). Their display name is printed as the signer.
 
-<<<<<<< HEAD
+Rotating `RX_SIGNING_PRIVATE_KEY` makes codes that haven't been saved yet unverifiable;
+already-saved records keep their verified status.
+
+### Reminders and notifications
+
+Reminder times, the "Notify me" switch and dose check-ins are stored per prescription at
+`users/{uid}/reminders/{prescriptionId}`. Any reminders kept on a device by older versions
+are imported automatically the first time the Reminders page opens.
+
+Notifications use Web Push and never include medication names (lock screens are public):
+
+1. `npm run generate:keys`: set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+   `VAPID_SUBJECT` and `CRON_SECRET`.
+2. Create the collection-group index the scheduler needs:
+   `npx firebase-tools deploy --only firestore:indexes --project YOUR_PROJECT_ID`
+3. Call `GET /api/cron/reminders` with `Authorization: Bearer $CRON_SECRET` every 5–15
+   minutes:
+   - **Vercel Pro**: add to `vercel.json`
+     `{"crons":[{"path":"/api/cron/reminders","schedule":"*/10 * * * *"}]}`. Vercel sends the
+     header automatically when `CRON_SECRET` is set. (Hobby plans only allow daily crons.)
+   - **Any plan**: a free external scheduler (e.g. cron-job.org) with that header.
+
+Reminders are sent at most once per dose, skipped if the dose is already ticked off, and
+dropped (not sent late) if the scheduler was down for more than two hours. On iPhone, Web
+Push works only after adding VeriDose to the Home Screen (iOS 16.4+).
+
+## 🧪 Testing
+
 ### Automated tests
 
 ```bash
@@ -274,20 +308,21 @@ npm run test:watch  # re-run on change
 
 Tests live next to the code (`*.test.ts`) and cover the shared Zod schemas, QR parsing,
 CSV export escaping, the security helpers (same-origin checks, body limits, rate limiting),
-session verification and revocation, and the API routes' 401/403/404/422 behaviour.
-Firestore itself is stubbed; an emulator-backed suite is a good next step.
+session verification and revocation, roles, prescription signing and tamper detection,
+timezone/DST reminder scheduling, the reminder sender, and the API routes' 401/403/404/422
+behaviour. Firestore itself is stubbed; an emulator-backed suite is a good next step.
 
 CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, build and a production
 dependency audit on every push to `main` and every pull request.
 
-### Test the API Endpoints
-=======
-Open `http://localhost:3000`
->>>>>>> 54f656f0b10c14c927bba812b81dc65825faca2b
+### Test the API endpoints
 
-### 4) Build for production
+1. **Health check** (public)
+   ```bash
+   curl http://localhost:3000/api/health
+   ```
 
-2. **Save Prescription** (requires a session: sign in in the browser, then copy the
+2. **Save a prescription** (requires a session: sign in in the browser, then copy the
    `veridose_session` cookie from DevTools → Application → Cookies)
    ```bash
    curl -X POST http://localhost:3000/api/save \
@@ -296,121 +331,63 @@ Open `http://localhost:3000`
      -d '{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}'
    ```
 
-3. **Retrieve Prescriptions** (paginated: pass the returned `next_cursor` as `cursor`)
+3. **List prescriptions** (paginated: pass the returned `next_cursor` as `cursor`)
    ```bash
    curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5"
    curl -H "Cookie: veridose_session=PASTE_COOKIE" "http://localhost:3000/api/prescriptions?limit=5&cursor=NEXT_CURSOR"
    curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions/stats
    ```
 
-   Without the cookie, both return `401`.
-
-### Test the Frontend
-
-```bash
-curl http://localhost:3000/api/health
-```
-
-```bash
-curl -X POST http://localhost:3000/api/save \
-  -H "Content-Type: application/json" \
-  -d '{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}'
-```
-
-```bash
-curl "http://localhost:3000/api/prescriptions?limit=5"
-```
+   Without the cookie, these return `401`.
 
 ### Frontend flow
 
-1. Open the app in the browser
-2. Navigate to the scan screen
-3. Allow camera access
-4. Scan a QR code with valid JSON
-5. Confirm the data is saved and visible in Firestore
+1. Sign up or log in
+2. Open **Scan**, allow camera access, and scan a QR code with valid JSON
+   (or upload a photo, or type the details)
+3. Review the details (signed codes show the verification banner) and save
+4. Check **History**, **Reminders**, and the record in Firestore
 
 ## 📁 Project Structure
 
 ```text
-Prescription_QR_App/
+my_prescription_app/
 ├── src/
-<<<<<<< HEAD
-│   ├── app/                    # Next.js App Router pages
-│   │   ├── api/               # API routes
-│   │   │   ├── health/        # Health check endpoint
-│   │   │   ├── save/          # Save prescription endpoint
-│   │   │   └── prescriptions/ # Prescription CRUD endpoints
-│   │   ├── history/           # History page
-│   │   ├── scan/              # Scan page
-│   │   ├── settings/          # Settings page
-│   │   └── page.tsx           # Home page
-│   ├── components/            # React components
-│   │   ├── dashboard/        # Dashboard components
-│   │   ├── scan/             # Scan-related components
-│   │   ├── history/          # History-related components
-│   │   └── ui/               # UI components
-│   ├── hooks/                 # Custom React hooks
-│   ├── lib/                   # Utility functions
-│   │   ├── api.ts            # API client
-│   │   ├── server/           # Server-side utilities
-│   │   │   ├── firebase.ts   # Firebase initialization
-│   │   │   ├── prescriptions.ts # Prescription operations
-│   │   │   └── errors.ts     # Error handling
-│   │   ├── schemas.ts        # Zod schemas shared by client and server
-│   │   ├── validation.ts     # QR parsing + form validation (built on schemas.ts)
-│   │   └── stats.ts          # Statistics computation
-│   └── types/                # TypeScript type definitions
-│       └── prescription.ts   # Prescription types
-├── public/                    # Static assets
-├── .env.example              # Example environment variables
-├── .gitignore                # Git ignore rules
-├── firebase-service-account.json # Firebase credentials (local, not committed)
-├── next.config.ts            # Next.js configuration
-├── package.json              # Dependencies
-├── tsconfig.json             # TypeScript configuration
-├── tailwind.config.ts        # Tailwind CSS configuration
-└── README.md                 # This file
-=======
-│   ├── app/
+│   ├── app/                     # Next.js App Router pages and API routes
 │   │   ├── api/
-│   │   │   ├── health/
-│   │   │   ├── save/
-│   │   │   └── prescriptions/
-│   │   ├── history/
-│   │   ├── scan/
-│   │   ├── settings/
-│   │   └── page.tsx
-│   ├── components/
-│   ├── hooks/
+│   │   │   ├── auth/            # Session cookie + profile
+│   │   │   ├── cron/reminders/  # Scheduler entry point (CRON_SECRET)
+│   │   │   ├── prescriptions/   # List, stats, detail, export
+│   │   │   ├── push/            # Web Push subscriptions
+│   │   │   ├── reminders/       # Reminder times and dose check-ins
+│   │   │   ├── rx/              # Issue / verify signed prescriptions
+│   │   │   ├── save/            # Save a prescription
+│   │   │   └── health/          # Health check
+│   │   ├── history/  login/  prescribe/  reminders/  scan/  settings/  signup/
+│   │   └── page.tsx             # Dashboard
+│   ├── components/              # UI by feature (auth, scan, history, prescribe, ...)
+│   ├── hooks/                   # Client hooks (session, prescriptions, reminders, push)
 │   ├── lib/
-│   │   ├── api.ts
-│   │   ├── server/
-│   │   │   ├── firebase.ts
-│   │   │   ├── prescriptions.ts
-│   │   │   └── errors.ts
-│   │   ├── validation.ts
-│   │   └── stats.ts
+│   │   ├── server/              # Server-only: auth, firebase, data access, signing, push
+│   │   ├── schemas.ts           # Zod schemas shared by client and server
+│   │   ├── schedule.ts          # Timezone-aware reminder scheduling
+│   │   └── validation.ts        # QR parsing + form validation
+│   ├── proxy.ts                 # Auth redirect + per-request CSP nonce
 │   └── types/
-│       └── prescription.ts
-├── public/
-├── .env.example
-├── .gitignore
-├── firebase-service-account.json
-├── next.config.ts
-├── package.json
-├── tsconfig.json
-├── tailwind.config.ts
-├── README.md
-└── LICENSE
+├── public/sw.js                 # Service worker: offline page + notifications
+├── scripts/                     # migrate-prescriptions, set-role, generate-keys
+├── firestore.rules              # Deny-all (server-only access)
+├── firestore.indexes.json       # Reminder scheduler index
+└── .github/workflows/ci.yml
 ```
 
 ## 🔐 Security Best Practices
 
 - Never commit `.env` or Firebase service account JSON files
 - Rotate service account keys periodically
-- Use restrictive Firestore rules in production
-- Keep API validation strict to prevent malformed payloads
-- Prefer environment variables over hardcoded secrets
+- Keep `RX_SIGNING_PRIVATE_KEY`, `VAPID_PRIVATE_KEY` and `CRON_SECRET` server-side only
+- Only grant the prescriber role to vetted accounts
+- Keep the deny-all `firestore.rules` deployed; the app only accesses Firestore from the server
 
 ## 🛠 Troubleshooting
 
@@ -432,24 +409,26 @@ Prescription_QR_App/
 - Check lighting and focus
 - Confirm the code includes the required keys: `med`, `dose`, and `duration`
 
+### Notifications not arriving
+
+- Check `GET /api/cron/reminders` is being called (it returns `due`/`sent`/`skipped`)
+- Confirm the Firestore index from `firestore.indexes.json` is deployed
+- Make sure notifications are turned on in the Reminders page *and* "Notify me" is ticked
+
 ### Dependency issues
 
 ```bash
 rm -rf node_modules package-lock.json
 npm install
->>>>>>> 54f656f0b10c14c927bba812b81dc65825faca2b
 ```
 
 ## 🚀 Future Improvements
 
-- User authentication and role-based access
-- Prescription history dashboard and filtering
-- Batch QR scanning support
-- QR generation for healthcare staff
-- Export to CSV / PDF
-- Reminder notifications
-- Dark mode and theme settings
-- Improved monitoring and performance optimization
+- Offline save queue (IndexedDB) that syncs when back online
+- Structured dosing (amount, unit, frequency) with automatic course end dates
+- Drug lookup and interaction warnings (RxNorm / openFDA)
+- Account deletion, multi-factor authentication, and caregiver sharing
+- PDF export and printable visit summaries
 
 ## 🤝 Contributing
 

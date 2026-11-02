@@ -18,7 +18,8 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("./firebase", () => ({ getAdminAuth: () => adminAuth }));
 
-const { createSessionCookie, getSessionUser, requirePageUser, requireUser, safeNextPath } = await import("./auth");
+const { createSessionCookie, getSessionUser, requirePageUser, requirePrescriber, requireUser, safeNextPath } =
+  await import("./auth");
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const authError = (code: string) => Object.assign(new Error(code), { code });
@@ -56,7 +57,18 @@ describe("getSessionUser", () => {
       name: "Pat",
       emailVerified: true,
       isAnonymous: false,
+      role: "patient",
     });
+  });
+
+  it("reads the prescriber role from custom claims", async () => {
+    signedIn({ user: { customClaims: { role: "prescriber" } } });
+    await expect(getSessionUser()).resolves.toMatchObject({ role: "prescriber" });
+  });
+
+  it("ignores unknown role claims", async () => {
+    signedIn({ user: { customClaims: { role: "admin" } } });
+    await expect(getSessionUser()).resolves.toMatchObject({ role: "patient" });
   });
 
   it("flags anonymous guest sessions", async () => {
@@ -97,6 +109,23 @@ describe("requireUser / requirePageUser", () => {
   it("redirects pages to login with the return path", async () => {
     cookieStore.get.mockReturnValue(undefined);
     await expect(requirePageUser("/history/abc")).rejects.toThrow("REDIRECT:/login?next=%2Fhistory%2Fabc");
+  });
+});
+
+describe("requirePrescriber", () => {
+  it("allows prescribers", async () => {
+    signedIn({ user: { customClaims: { role: "prescriber" } } });
+    await expect(requirePrescriber()).resolves.toMatchObject({ uid: "u1", role: "prescriber" });
+  });
+
+  it("returns 403 for patients", async () => {
+    signedIn();
+    await expect(requirePrescriber()).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("returns 403 for anonymous sessions even with the claim", async () => {
+    signedIn({ provider: "anonymous", user: { customClaims: { role: "prescriber" } } });
+    await expect(requirePrescriber()).rejects.toMatchObject({ statusCode: 403 });
   });
 });
 

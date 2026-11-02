@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { BellRing, Check, Clock, Info, Pill, RefreshCw, ScanLine } from "lucide-react";
+import { BellOff, BellRing, Check, Clock, Info, Loader2, Pill, RefreshCw, ScanLine } from "lucide-react";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { PrescriptionListSkeleton } from "@/components/ui/skeleton";
 import { usePrescriptions } from "@/hooks/use-prescriptions";
+import { usePush } from "@/hooks/use-push";
 import { useReminders } from "@/hooks/use-reminders";
+import { useToast } from "@/hooks/use-toasts";
 import { formatDayKey, formatRelative, dayKey } from "@/lib/format";
 import { lastNDays } from "@/lib/stats";
 
@@ -15,7 +17,30 @@ const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
 export function RemindersView() {
   const { prescriptions, loading, error, refresh } = usePrescriptions(100);
-  const { entryFor, setTime, toggleTaken, hydrated } = useReminders();
+  const { entryFor, setTime, setNotify, toggleTaken, hydrated, error: reminderError, push, timezone, refreshPushStatus } =
+    useReminders();
+  const pushDevice = usePush();
+  const { toast } = useToast();
+
+  const enableNotifications = async () => {
+    try {
+      await pushDevice.enable();
+      await refreshPushStatus();
+      toast({ title: "Notifications on", description: "Switch on “Notify me” for each medication.", variant: "success" });
+    } catch (cause) {
+      toast({ title: "Could not turn on notifications", description: cause instanceof Error ? cause.message : undefined, variant: "error" });
+    }
+  };
+
+  const disableNotifications = async () => {
+    try {
+      await pushDevice.disable();
+      await refreshPushStatus();
+      toast({ title: "Notifications off on this device", variant: "info" });
+    } catch (cause) {
+      toast({ title: "Could not turn off notifications", description: cause instanceof Error ? cause.message : undefined, variant: "error" });
+    }
+  };
   const active = useMemo(() => prescriptions.filter((item) => item.status === "active"), [prescriptions]);
   const days = useMemo(() => lastNDays(7), []);
   const today = dayKey();
@@ -104,6 +129,45 @@ export function RemindersView() {
         </div>
       </section>
 
+      <section className="card flex flex-wrap items-start justify-between gap-3 p-4" aria-labelledby="push-title">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand-strong">
+            {pushDevice.state === "on" ? <BellRing className="size-5" aria-hidden /> : <BellOff className="size-5" aria-hidden />}
+          </span>
+          <div>
+            <h2 id="push-title" className="text-sm font-bold text-ink">Notifications on this device</h2>
+            <p className="mt-0.5 max-w-prose text-xs leading-relaxed text-muted">
+              {!push.configured && hydrated
+                ? "Notifications aren't set up on this server yet. You can still log doses here."
+                : pushDevice.state === "unsupported"
+                  ? "This browser can't receive notifications. On iPhone, add VeriDose to your Home Screen first (iOS 16.4+)."
+                  : pushDevice.state === "denied"
+                    ? "Notifications are blocked for this site. Allow them in your browser settings, then reload."
+                    : pushDevice.state === "on"
+                      ? `Reminders arrive at the times below (${timezone}). They never show medication names.`
+                      : "Get a reminder at each dose time, even when VeriDose is closed."}
+            </p>
+          </div>
+        </div>
+        {push.configured && (pushDevice.state === "off" || pushDevice.state === "on" || pushDevice.state === "working") ? (
+          <button
+            type="button"
+            onClick={() => void (pushDevice.state === "on" ? disableNotifications() : enableNotifications())}
+            disabled={pushDevice.state === "working"}
+            className={`btn min-h-10 px-4 text-sm ${pushDevice.state === "on" ? "btn-ghost" : "btn-primary"}`}
+          >
+            {pushDevice.state === "working" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            {pushDevice.state === "on" ? "Turn off" : "Turn on notifications"}
+          </button>
+        ) : null}
+      </section>
+
+      {reminderError ? (
+        <div role="alert" className="card border-danger/30 bg-danger/5 p-4 text-sm text-danger">
+          {reminderError}
+        </div>
+      ) : null}
+
       {error ? (
         <div role="alert" className="card border-danger/30 bg-danger/5 p-4 text-sm text-danger">
           {error}
@@ -145,7 +209,7 @@ export function RemindersView() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => toggleTaken(prescription.id)}
+                    onClick={() => void toggleTaken(prescription.id)}
                     aria-pressed={taken}
                     className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition ${
                       taken
@@ -172,10 +236,21 @@ export function RemindersView() {
                         id={`time-${prescription.id}`}
                         type="time"
                         value={entry.time}
-                        onChange={(event) => setTime(prescription.id, event.target.value)}
+                        onChange={(event) => {
+                          if (event.target.value) void setTime(prescription.id, event.target.value);
+                        }}
                         className="field min-h-10 w-[7.5rem] py-1 text-sm"
                       />
-                      <span className="text-[0.7rem] text-muted">Kept on this device</span>
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink">
+                        <input
+                          type="checkbox"
+                          checked={entry.notify}
+                          onChange={(event) => void setNotify(prescription.id, event.target.checked)}
+                          disabled={!push.configured}
+                          className="size-4 accent-[var(--brand)]"
+                        />
+                        Notify me
+                      </label>
                     </div>
                   </div>
 
@@ -191,7 +266,7 @@ export function RemindersView() {
                           <button
                             key={day}
                             type="button"
-                            onClick={() => toggleTaken(prescription.id, day)}
+                            onClick={() => void toggleTaken(prescription.id, day)}
                             aria-pressed={isTaken}
                             aria-label={`${formatDayKey(day)}, ${isTaken ? "taken" : "not taken"}`}
                             title={formatDayKey(day)}
@@ -218,8 +293,8 @@ export function RemindersView() {
 
       <p className="card flex items-start gap-2 p-4 text-xs leading-relaxed text-muted">
         <Info className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
-        Reminder times and check-ins stay private on this device. Keep following the schedule given by your
-        clinician or pharmacist.
+        Reminder times and check-ins are saved privately to your account, so they follow you across devices.
+        Reminders are a memory aid: keep following the schedule given by your clinician or pharmacist.
       </p>
     </div>
   );

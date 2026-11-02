@@ -43,7 +43,14 @@ export function parsePrescriptionPayload(raw: string): ParseResult {
   const extraFields = Object.keys(parsed).filter((key) => !KNOWN_QR_FIELDS.includes(key));
   const warnings = extraFields.length > 0 ? [`Extra fields ignored: ${extraFields.join(", ")}`] : [];
 
-  return { ok: true, value: result.data, warnings };
+  // A prescriber-signed code carries its token in `rx`; the server checks it.
+  const rx = (parsed as { rx?: unknown }).rx;
+  return {
+    ok: true,
+    value: result.data,
+    ...(typeof rx === "string" && rx ? { rx } : {}),
+    warnings,
+  };
 }
 
 /**

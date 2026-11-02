@@ -2,14 +2,17 @@
 
 import { ArrowLeft, Loader2, Save, ShieldCheck, TriangleAlert } from "lucide-react";
 
+import { RxStatusBanner } from "@/components/prescription/verification";
 import { SourceBadge } from "@/components/ui/badges";
-import type { PrescriptionDraft, PrescriptionFieldErrors } from "@/types/prescription";
+import type { PrescriptionDraft, PrescriptionFieldErrors, RxCheck } from "@/types/prescription";
 
 export function ScanPreview({
   draft,
   errors,
   warnings,
   formError,
+  rxCheck = { status: "none" },
+  edited = false,
   saving,
   onChange,
   onSave,
@@ -19,6 +22,10 @@ export function ScanPreview({
   errors: PrescriptionFieldErrors;
   warnings: string[];
   formError: string | null;
+  /** Signature status of a prescriber-signed code. */
+  rxCheck?: RxCheck | "checking";
+  /** True when the user changed fields that the prescriber signed. */
+  edited?: boolean;
   saving: boolean;
   onChange: (patch: Partial<PrescriptionDraft>) => void;
   onSave: () => void;
@@ -50,6 +57,8 @@ export function ScanPreview({
           <span className="chip border-warning/30 bg-warning/10 text-warning">Not saved yet</span>
         </div>
       </div>
+
+      <RxStatusBanner check={rxCheck} edited={edited} />
 
       {warnings.length > 0 ? (
         <ul className="space-y-1.5 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-xs text-warning">

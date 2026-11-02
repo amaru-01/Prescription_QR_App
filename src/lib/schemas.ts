@@ -44,11 +44,67 @@ export const prescriptionInputSchema = z.object({
   duration: requiredText("Duration"),
 });
 
+/** Signed token from a prescriber-issued QR code (format checked by the server). */
+export const rxTokenSchema = z.string().min(1).max(4096);
+
 /** POST /api/save body. Unknown sources fall back to "scan" for older clients. */
 export const saveRequestSchema = prescriptionInputSchema.extend({
   source: sourceSchema.catch("scan").default("scan"),
   notes: notesSchema.optional(),
+  rx: rxTokenSchema.optional(),
 });
+
+/** POST /api/rx/verify body: the token plus the fields as currently reviewed. */
+export const rxVerifyRequestSchema = prescriptionInputSchema.extend({ rx: rxTokenSchema });
+
+/** POST /api/rx/issue body. */
+export const rxIssueRequestSchema = prescriptionInputSchema;
+
+const timeZoneSchema = z
+  .string()
+  .max(64)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Unknown timezone.");
+
+/** PUT /api/reminders/[id] body. */
+export const reminderUpdateSchema = z
+  .object({
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be HH:MM (24-hour).").optional(),
+    notify: z.boolean().optional(),
+    timezone: timeZoneSchema,
+  })
+  .refine((value) => value.time !== undefined || value.notify !== undefined, {
+    message: "Provide a time or notify field to update.",
+  });
+
+/** POST /api/reminders/[id]/doses body. */
+export const doseRequestSchema = z.object({
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Day must be a date in YYYY-MM-DD format."),
+  taken: z.boolean(),
+});
+
+/** POST /api/reminders/import body: the old on-device reminder map. */
+export const reminderImportSchema = z.object({
+  timezone: timeZoneSchema,
+  reminders: z.record(
+    documentIdSchema,
+    z.object({ time: z.string().max(5), log: z.array(z.string().max(10)).max(400) })
+  ),
+});
+
+/** POST /api/push/subscription body (a browser PushSubscription as JSON). */
+export const pushSubscriptionSchema = z.object({
+  endpoint: z.url({ protocol: /^https$/ }).max(2048),
+  keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(128) }),
+});
+
+export const pushUnsubscribeSchema = z.object({ endpoint: z.string().max(2048) });
 
 /** PATCH /api/prescriptions/[id] body. */
 export const updateRequestSchema = z
@@ -72,7 +128,7 @@ export const listQuerySchema = z.object({
 });
 
 /** Keys a QR payload may carry without triggering an "ignored" warning. */
-export const KNOWN_QR_FIELDS = ["med", "dose", "duration", "notes", "source"];
+export const KNOWN_QR_FIELDS = ["med", "dose", "duration", "notes", "source", "rx"];
 
 /** First message per prescription field, in the shape the forms already render. */
 export function fieldErrorsFrom(error: z.ZodError): PrescriptionFieldErrors {

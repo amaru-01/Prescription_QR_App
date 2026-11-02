@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { PrescriptionActions } from "@/components/history/prescription-actions";
+import { VerifiedBadge } from "@/components/prescription/verification";
 import { SourceBadge, StatusBadge } from "@/components/ui/badges";
 import { requirePageUser } from "@/lib/server/auth";
 import { logger } from "@/lib/server/logger";
@@ -93,6 +94,7 @@ export default async function PrescriptionDetailPage({ params }: PageProps) {
                   {prescription.dose} · {prescription.duration}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {prescription.verification ? <VerifiedBadge verification={prescription.verification} /> : null}
                   <SourceBadge source={prescription.source} />
                   <span className="chip">
                     <CalendarDays className="size-3" aria-hidden />

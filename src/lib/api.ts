@@ -2,6 +2,8 @@ import type {
   ApiErrorPayload,
   Prescription,
   PrescriptionDraft,
+  PrescriptionInput,
+  RxCheck,
   PrescriptionListResponse,
   SavePrescriptionResponse,
   HealthResponse,
@@ -111,6 +113,92 @@ export const prescriptionApi = {
   async health(): Promise<HealthResponse> {
     const res = await request("/api/health", {}, "Could not check the connection.");
     return (await res.json()) as HealthResponse;
+  },
+};
+
+export interface IssuedRx {
+  rxId: string;
+  med: string;
+  dose: string;
+  duration: string;
+  issuedAt: string;
+  expiresAt: string;
+  claimed: boolean;
+  expired: boolean;
+}
+
+/** Signed prescription QR codes. */
+export const rxApi = {
+  /** Check a scanned code's signature before saving (advisory; save re-checks). */
+  async verify(input: PrescriptionInput & { rx: string }): Promise<RxCheck> {
+    const res = await request("/api/rx/verify", { method: "POST", ...json(input) }, "Could not check this code.");
+    return ((await res.json()) as { rx: RxCheck }).rx;
+  },
+
+  /** Prescribers: sign a new prescription and get the QR text. */
+  async issue(input: PrescriptionInput): Promise<{ qrText: string; issued: IssuedRx }> {
+    const res = await request("/api/rx/issue", { method: "POST", ...json(input) }, "Could not issue the prescription.");
+    const data = (await res.json()) as { qr_text: string; issued: IssuedRx };
+    return { qrText: data.qr_text, issued: data.issued };
+  },
+
+  async listIssued(): Promise<IssuedRx[]> {
+    const res = await request("/api/rx/issued", {}, "Could not load issued prescriptions.");
+    return ((await res.json()) as { issued: IssuedRx[] }).issued;
+  },
+};
+
+export interface ReminderState {
+  time: string;
+  timezone: string;
+  notify: boolean;
+  takenDays: string[];
+}
+
+/** Server-backed reminders and dose check-ins. */
+export const remindersApi = {
+  async list(): Promise<{ reminders: Record<string, ReminderState>; push: { configured: boolean; subscribed: boolean } }> {
+    const res = await request("/api/reminders", {}, "Could not load reminders.");
+    return (await res.json()) as {
+      reminders: Record<string, ReminderState>;
+      push: { configured: boolean; subscribed: boolean };
+    };
+  },
+
+  async update(id: string, changes: { time?: string; notify?: boolean; timezone: string }): Promise<ReminderState> {
+    const res = await request(
+      `/api/reminders/${encodeURIComponent(id)}`,
+      { method: "PUT", ...json(changes) },
+      "Could not update the reminder.",
+    );
+    return ((await res.json()) as { reminder: ReminderState }).reminder;
+  },
+
+  async setDose(id: string, day: string, taken: boolean): Promise<ReminderState> {
+    const res = await request(
+      `/api/reminders/${encodeURIComponent(id)}/doses`,
+      { method: "POST", ...json({ day, taken }) },
+      "Could not update the dose.",
+    );
+    return ((await res.json()) as { reminder: ReminderState }).reminder;
+  },
+
+  async import(reminders: Record<string, { time: string; log: string[] }>, timezone: string): Promise<number> {
+    const res = await request(
+      "/api/reminders/import",
+      { method: "POST", ...json({ reminders, timezone }) },
+      "Could not import reminders.",
+    );
+    return ((await res.json()) as { imported: number }).imported;
+  },
+};
+
+export const pushApi = {
+  async subscribe(subscription: PushSubscriptionJSON): Promise<void> {
+    await request("/api/push/subscription", { method: "POST", ...json(subscription) }, "Could not turn on notifications.");
+  },
+  async unsubscribe(endpoint: string): Promise<void> {
+    await request("/api/push/subscription", { method: "DELETE", ...json({ endpoint }) }, "Could not turn off notifications.");
   },
 };
 
