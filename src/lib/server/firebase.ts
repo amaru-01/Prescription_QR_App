@@ -30,6 +30,7 @@ function loadServiceAccount(): admin.ServiceAccount {
   const candidates = [
     process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
     "firebase-service-account.json",
+    "service-account.json",
     path.join("src", "lib", "server", "firebase-service-account.json"),
   ].filter((p): p is string => Boolean(p));
 
@@ -83,4 +84,12 @@ export function getDb(): admin.firestore.Firestore {
     return initializeFirebase();
   }
   return db;
+}
+
+/**
+ * Get the Firebase Admin Auth client (initializes the app if needed).
+ */
+export function getAdminAuth(): admin.auth.Auth {
+  initializeFirebase();
+  return admin.auth();
 }

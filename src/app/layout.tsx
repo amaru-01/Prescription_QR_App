@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
 import "@fontsource-variable/plus-jakarta-sans";
@@ -10,6 +11,8 @@ import { BottomNav } from "@/components/layout/bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Providers } from "@/components/providers";
 import { PwaRegister } from "@/components/pwa-register";
+import { getSessionUser } from "@/lib/server/auth";
+import type { SessionUser } from "@/types/auth";
 
 export const metadata: Metadata = {
   title: {
@@ -52,14 +55,24 @@ export const viewport: Viewport = {
 
 const themeScript = `(function(){try{var stored=localStorage.getItem("veridose.theme");var isDark=stored?stored==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",isDark);document.documentElement.style.colorScheme=isDark?"dark":"light";}catch(e){}})();`;
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Set per request by src/proxy.ts; the inline theme script must carry it to pass the CSP.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
+  let user: SessionUser | null = null;
+  try {
+    user = await getSessionUser();
+  } catch (error) {
+    console.error("Could not verify session:", error);
+  }
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-dvh antialiased">
-        <Providers>
+        <Providers user={user}>
           <a
             href="#main-content"
             className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-brand focus:px-5 focus:py-3 focus:text-sm focus:font-semibold focus:text-white"

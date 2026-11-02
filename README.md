@@ -136,13 +136,121 @@ FIREBASE_CREDENTIALS='{"type":"service_account","project_id":"YOUR_PROJECT_ID",.
 - Firebase project with Firestore enabled
 - Git
 
-### 1) Install dependencies
+### Step 1: Firebase Setup
+
+1. **Create a Firebase Project**
+   - Go to [Firebase Console](https://console.firebase.google.com/)
+   - Click "Add project" and follow the setup wizard
+   - Enable Firestore Database in the Firebase Console
+   - Choose your preferred location (e.g., nam5 for US)
+
+2. **Generate Service Account Key**
+   - Go to Firebase Console → Project Settings → Service Accounts
+   - Click "Generate new private key"
+   - Download the JSON file (save it securely, never commit to git)
+   - The JSON file contains your service account credentials
+
+3. **Enable Cloud Firestore API**
+   - Visit: https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=YOUR_PROJECT_ID
+   - Click "Enable" to activate the Cloud Firestore API
+
+4. **Create Firestore Database**
+   - Go to: https://console.cloud.google.com/datastore/setup?project=YOUR_PROJECT_ID
+   - Click "Create database"
+   - Choose "Standard Edition" for simplicity
+   - Choose **"Restrictive"** security rules (the app only accesses Firestore from the server)
+   - Select your preferred location
+   - Click "Create"
+   - Deploy the repo's deny-all rules: `npx firebase-tools deploy --only firestore:rules`
+
+5. **Enable Firebase Authentication**
+   - Firebase Console → Authentication → Get started
+   - Sign-in method → enable **Email/Password** and **Anonymous** (used for "Continue as guest")
+   - Settings → **User actions**: keep **Email enumeration protection** on
+   - Settings → **Password policy**: require at least 8 characters (the UI enforces this, but
+     Firebase's own minimum is 6, so set it here to enforce it for every client)
+   - Settings → **Authorized domains**: add your production domain
+
+6. **Register a Web App** (for the browser-side sign-in config)
+   - Project settings → General → Your apps → Add app → Web
+   - Copy `apiKey`, `authDomain`, `projectId` and `appId` into the `NEXT_PUBLIC_FIREBASE_*`
+     variables in `.env` (these values are public by design)
+
+### Step 2: Local Development Setup
+
+1. **Clone or Navigate to the Project**
+   ```bash
+   cd my_prescription_app
+   ```
+
+2. **Install Dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure Environment Variables**
+
+   Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+   Edit `.env` and add your Firebase credentials:
+   ```env
+   # Option 1: Provide Firebase credentials as JSON string (recommended for production)
+   FIREBASE_CREDENTIALS='{"type":"service_account","project_id":"YOUR_PROJECT_ID",...}'
+
+   # Option 2: Provide path to service account JSON file (for local development)
+   # FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
+   ```
+
+   Place your downloaded service account JSON file as `firebase-service-account.json` in the project root (if using Option 2).
+
+4. **Run the Application**
+   ```bash
+   npm run dev
+   ```
+   The application will be available at `http://localhost:3000`
+
+5. **Test the Application**
+   - Open `http://localhost:3000` in a web browser
+   - Navigate to the scan page
+   - Click "Start Camera" and grant camera permissions
+   - Scan a QR code with prescription data
+   - Verify the prescription data is displayed and saved to Firestore
+   - Check Firebase Console to verify data is being saved
+
+### Step 3: Build for Production
 
 ```bash
 npm install
 ```
 
-### 2) Configure environment variables
+### Authentication & data access
+
+- Users sign in with Firebase Authentication in the browser. The resulting ID token is
+  immediately exchanged at `POST /api/auth/session` for an **HttpOnly, SameSite session
+  cookie**; no token is stored in localStorage.
+- Every API route and private page verifies that cookie on the server (signature, expiry,
+  revocation, disabled accounts). `src/proxy.ts` also redirects signed-out visitors to
+  `/login` before rendering.
+- Prescriptions are stored per user at `users/{uid}/prescriptions/{id}`, so a user can only
+  ever reach their own records.
+- "Sign out of all devices" (Settings) revokes every session for the account.
+
+### Migrating records saved before authentication
+
+Older records live in the top-level `prescriptions` collection and are hidden after this
+change. Create your account, then assign them to it:
+
+```bash
+npm run migrate:prescriptions -- --email you@example.com            # dry run
+npm run migrate:prescriptions -- --email you@example.com --apply    # copy
+# Optional, after checking the app: also remove the old copies
+npm run migrate:prescriptions -- --email you@example.com --apply --delete-originals
+```
+
+### Step 4: Security Best Practices
 
 ```bash
 cp .env.example .env
@@ -160,14 +268,23 @@ Open `http://localhost:3000`
 
 ### 4) Build for production
 
-```bash
-npm run build
-npm start
-```
+2. **Save Prescription** (requires a session: sign in in the browser, then copy the
+   `veridose_session` cookie from DevTools → Application → Cookies)
+   ```bash
+   curl -X POST http://localhost:3000/api/save \
+     -H "Content-Type: application/json" \
+     -H "Cookie: veridose_session=PASTE_COOKIE" \
+     -d '{"med":"Amoxicillin","dose":"500mg","duration":"7 days"}'
+   ```
 
-## 🧪 Testing the app
+3. **Retrieve Prescriptions**
+   ```bash
+   curl -H "Cookie: veridose_session=PASTE_COOKIE" http://localhost:3000/api/prescriptions?limit=5
+   ```
 
-### API checks
+   Without the cookie, both return `401`.
+
+### Test the Frontend
 
 ```bash
 curl http://localhost:3000/api/health

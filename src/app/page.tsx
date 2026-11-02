@@ -8,6 +8,7 @@ import { PrescriptionCard } from "@/components/prescription/prescription-card";
 import { Onboarding } from "@/components/onboarding";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Reveal, Tilt } from "@/components/motion";
+import { requirePageUser } from "@/lib/server/auth";
 import { listPrescriptions } from "@/lib/server/prescriptions";
 import { computeStats } from "@/lib/stats";
 import type { Prescription } from "@/types/prescription";
@@ -22,12 +23,14 @@ const FLOW = [
 ] as const;
 
 export default async function HomePage() {
+  const user = await requirePageUser("/");
   let prescriptions: Prescription[] = [];
   let loadError: string | null = null;
 
   try {
-    prescriptions = await listPrescriptions(100);
+    prescriptions = await listPrescriptions(user.uid, 100);
   } catch (error) {
+    console.error("Could not load prescriptions:", error);
     loadError = "Could not load prescriptions right now.";
   }
 

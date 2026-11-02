@@ -14,6 +14,7 @@ import {
 
 import { PrescriptionActions } from "@/components/history/prescription-actions";
 import { SourceBadge, StatusBadge } from "@/components/ui/badges";
+import { requirePageUser } from "@/lib/server/auth";
 import { BackendError } from "@/lib/server/errors";
 import { getPrescriptionById } from "@/lib/server/prescriptions";
 import { formatDateTime, formatRelative, initialsFor } from "@/lib/format";
@@ -21,34 +22,26 @@ import type { Prescription } from "@/types/prescription";
 
 export const dynamic = "force-dynamic";
 
-type PageProps = { params: Promise<{ id: string }> };
+// Generic on purpose: medication names in <title> leak into browser history and tab previews.
+export const metadata: Metadata = { title: "Prescription details" };
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { id } = await params;
-  try {
-    const record = await getPrescriptionById(id);
-    return {
-      title: record ? `${record.med} ${record.dose}` : "Prescription",
-      description: record ? `Prescription details for ${record.med} ${record.dose}, ${record.duration}.` : undefined,
-    };
-  } catch {
-    return { title: "Prescription" };
-  }
-}
+type PageProps = { params: Promise<{ id: string }> };
 
 export default async function PrescriptionDetailPage({ params }: PageProps) {
   const { id } = await params;
+  const user = await requirePageUser(`/history/${encodeURIComponent(id)}`);
+
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) notFound();
 
   let record: Prescription | null = null;
   let loadError: string | null = null;
 
   try {
-    record = await getPrescriptionById(id);
+    record = await getPrescriptionById(user.uid, id);
   } catch (error) {
-    loadError =
-      error instanceof BackendError
-        ? error.message
-        : "The prescription service is unavailable right now. Please try again in a moment.";
+    if (error instanceof BackendError && error.statusCode === 404) notFound();
+    console.error("Could not load prescription:", error);
+    loadError = "The prescription service is unavailable right now. Please try again in a moment.";
   }
 
   if (!record && !loadError) notFound();
