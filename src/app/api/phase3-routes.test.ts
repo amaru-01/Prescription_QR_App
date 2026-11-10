@@ -146,10 +146,10 @@ describe("/api/cron/reminders", () => {
   it("runs due reminders with the right secret", async () => {
     process.env.CRON_SECRET = "s3cret-value";
     push.isPushConfigured.mockReturnValue(true);
-    reminders.runDueReminders.mockResolvedValue({ due: 2, sent: 1, skipped: 1 });
+    reminders.runDueReminders.mockResolvedValue({ due: 2, sent: 1, sentSubscriptions: 1, skipped: 1, failed: 0, retried: 0 });
     const res = await call("Bearer s3cret-value");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true, due: 2, sent: 1, skipped: 1 });
+    expect(await res.json()).toEqual({ success: true, due: 2, sent: 1, sentSubscriptions: 1, skipped: 1, failed: 0, retried: 0 });
   });
 });
 

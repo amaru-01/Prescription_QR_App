@@ -13,7 +13,7 @@ import type {
   PrescriptionVerification,
   RxCheck,
 } from "@/types/prescription";
-import { onPrescriptionDeleted, onPrescriptionStatusChanged } from "./reminders";
+import { readReminder, stageReminderDelete, stageReminderStatusChange } from "./reminders";
 import type { RxPayload } from "./rx-signing";
 
 export { MAX_LIST_LIMIT };
@@ -244,14 +244,18 @@ export async function getPrescriptionById(uid: string, id: string): Promise<Pres
   return toPrescription(doc.id, doc.data());
 }
 
-/** Update the supported editable prescription fields. */
+/**
+ * Update the supported editable prescription fields. A status change updates
+ * the prescription's reminder in the same transaction.
+ */
 export async function updatePrescription(uid: string, id: string, updates: PrescriptionUpdate): Promise<void> {
+  const ref = userPrescriptions(uid).doc(id);
   try {
-    await userPrescriptions(uid).doc(id).update({
-      ...updates,
-      updated_at: FieldValue.serverTimestamp(),
+    await getDb().runTransaction(async (tx) => {
+      const reminder = updates.status ? await readReminder(tx, uid, id) : null;
+      tx.update(ref, { ...updates, updated_at: FieldValue.serverTimestamp() });
+      if (reminder && updates.status) stageReminderStatusChange(tx, uid, id, reminder, updates.status);
     });
-    if (updates.status) await onPrescriptionStatusChanged(uid, id, updates.status);
   } catch (error) {
     if ((error as { code?: unknown })?.code === NOT_FOUND_CODE) {
       throw new BackendError("Prescription not found.", 404);
@@ -261,16 +265,15 @@ export async function updatePrescription(uid: string, id: string, updates: Presc
 }
 
 /**
- * Delete one of the user's prescriptions.
+ * Delete one of the user's prescriptions, and its reminder, atomically.
  */
 export async function deletePrescription(uid: string, id: string): Promise<void> {
   const ref = userPrescriptions(uid).doc(id);
-  const doc = await ref.get();
-  if (!doc.exists) {
-    throw new BackendError("Prescription not found.", 404);
-  }
-  await ref.delete();
-  await onPrescriptionDeleted(uid, id);
+  await getDb().runTransaction(async (tx) => {
+    if (!(await tx.get(ref)).exists) throw new BackendError("Prescription not found.", 404);
+    tx.delete(ref);
+    stageReminderDelete(tx, uid, id);
+  });
 }
 
 /**
