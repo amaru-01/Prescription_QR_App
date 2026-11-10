@@ -11,7 +11,7 @@ import {
   type User,
 } from "firebase/auth";
 
-import { getClientAuth } from "@/lib/firebase-client";
+import { getAppCheckToken, getClientAuth } from "@/lib/firebase-client";
 
 const FRIENDLY_ERRORS: Record<string, string> = {
   "auth/invalid-credential": "That email and password don't match. Check them or create an account.",
@@ -40,9 +40,13 @@ async function startServerSession(user: User): Promise<void> {
   const auth = getClientAuth();
   try {
     const idToken = await user.getIdToken();
+    const appCheckToken = await getAppCheckToken();
     const res = await fetch("/api/auth/session", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(appCheckToken ? { "X-Firebase-AppCheck": appCheckToken } : {}),
+      },
       body: JSON.stringify({ idToken }),
       credentials: "same-origin",
     });

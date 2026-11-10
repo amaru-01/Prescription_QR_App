@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/server/auth";
+import { invalidateUserCache, requireUser } from "@/lib/server/auth";
 import { BackendError, errorResponse } from "@/lib/server/errors";
 import { getAdminAuth } from "@/lib/server/firebase";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
@@ -10,7 +10,7 @@ export async function PATCH(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
-    rateLimit(`profile:${user.uid}`, 10, 60_000);
+    await rateLimit(`profile:${user.uid}`, 10, 60_000);
 
     if (user.role === "prescriber") {
       throw new BackendError("A prescriber's name is managed by an administrator and cannot be changed here.", 403);
@@ -23,6 +23,7 @@ export async function PATCH(request: Request) {
     }
 
     await getAdminAuth().updateUser(user.uid, { displayName: name });
+    invalidateUserCache(user.uid);
     return Response.json({ success: true, user: { ...user, name } });
   } catch (error) {
     return errorResponse(error);

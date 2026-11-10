@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const user = await requireUser();
-    rateLimit(`export:${user.uid}`, 5, 60_000);
+    await rateLimit(`export:${user.uid}`, 5, 60_000);
 
     const csv = await exportPrescriptions(user.uid);
     const stamp = new Date().toISOString().slice(0, 10);

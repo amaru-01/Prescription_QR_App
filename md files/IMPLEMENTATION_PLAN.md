@@ -103,7 +103,7 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 3. Auth lookup cache (#8)
    - In `getSessionUser`, add a 30 s LRU (max 1,000 entries) for the `getUser` result keyed by uid; invalidate on `DELETE /api/auth/session?all=1` and role/profile change.
    - Measure before/after request latency and Identity Toolkit call count; record in the PR.
-4. `web-push` 4.x upgrade after reading the changelog; keep the CI require(esm) check.
+4. ~~`web-push` 4.x upgrade~~ — **deferred**: 4.0.0 pulls an ESM-only dependency and fails `require()` with `ERR_REQUIRE_ESM`, the same failure that broke Vercel earlier (caught by the CI check). Stay on 3.6.x until web-push ships a CommonJS-compatible release.
 
 **Acceptance:** limiter tests run against both implementations; two parallel serverless instances share counts (manual check on a Vercel preview); anonymous user gets 403 on the restricted routes; p50 latency of an authenticated API call drops measurably.
 **Rollback:** env flags (`APP_CHECK_ENFORCE`, Redis vars unset → memory limiter); revert PR for the rest.

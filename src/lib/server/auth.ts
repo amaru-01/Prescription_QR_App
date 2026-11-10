@@ -5,6 +5,7 @@ import { cache } from "react";
 import { SESSION_COOKIE } from "@/lib/session-cookie";
 import type { SessionUser } from "@/types/auth";
 import { BackendError } from "./errors";
+import type { UserRecord } from "firebase-admin/auth";
 import { getAdminAuth } from "./firebase";
 
 export { SESSION_COOKIE };
@@ -16,6 +17,46 @@ export const SESSION_MAX_AGE_SECONDS = 5 * 24 * 60 * 60;
 
 /** A sign-in must be this recent to be exchanged for a session cookie. */
 const MAX_SIGN_IN_AGE_SECONDS = 5 * 60;
+
+/**
+ * Short-lived cache of Firebase user records, per server instance. Looking the
+ * user up on every request costs a round trip to Google; this keeps one lookup
+ * per user per TTL. Revocation, role and name changes therefore reach other
+ * instances within USER_CACHE_TTL_MS (the instance that makes the change drops
+ * its own entry immediately via invalidateUserCache). Set AUTH_CACHE_TTL_MS=0
+ * to turn the cache off.
+ */
+const USER_CACHE_MAX = 1000;
+const userCache = new Map<string, { at: number; user: UserRecord }>();
+
+function cacheTtlMs(): number {
+  const configured = Number(process.env.AUTH_CACHE_TTL_MS);
+  return Number.isFinite(configured) && process.env.AUTH_CACHE_TTL_MS !== undefined ? configured : 30_000;
+}
+
+async function loadUser(uid: string): Promise<UserRecord> {
+  const ttl = cacheTtlMs();
+  const hit = userCache.get(uid);
+  if (hit && ttl > 0 && Date.now() - hit.at < ttl) return hit.user;
+
+  const user = await getAdminAuth().getUser(uid);
+  if (ttl > 0) {
+    userCache.delete(uid);
+    userCache.set(uid, { at: Date.now(), user });
+    if (userCache.size > USER_CACHE_MAX) userCache.delete(userCache.keys().next().value!);
+  }
+  return user;
+}
+
+/** Forget a cached user, e.g. after revoking their sessions or changing their profile. */
+export function invalidateUserCache(uid: string): void {
+  userCache.delete(uid);
+}
+
+/** Test hook. */
+export function clearUserCache(): void {
+  userCache.clear();
+}
 
 /** A vouched-for name from the custom claim, or null when absent or malformed. */
 function credentialNameFrom(value: unknown): string | null {
@@ -45,7 +86,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   try {
     const auth = getAdminAuth();
     const decoded = await auth.verifySessionCookie(sessionCookie);
-    const user = await auth.getUser(decoded.uid);
+    const user = await loadUser(decoded.uid);
 
     if (user.disabled) return null;
     const validAfter = user.tokensValidAfterTime ? Date.parse(user.tokensValidAfterTime) : 0;
@@ -71,6 +112,20 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) throw new BackendError("Please log in to continue.", 401);
+  return user;
+}
+
+/**
+ * For routes guests may not use (reminders, notifications): 401 when signed
+ * out, 403 for anonymous guest accounts. Guests can scan and save records, but
+ * anonymous accounts are free to create in bulk, so they get no features that
+ * hold server state or send anything to other systems.
+ */
+export async function requireRegisteredUser(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.isAnonymous) {
+    throw new BackendError("Create a free account to use this feature.", 403);
+  }
   return user;
 }
 

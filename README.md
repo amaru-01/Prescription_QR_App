@@ -396,6 +396,27 @@ my_prescription_app/
 - Push subscriptions are accepted only from known push services (FCM, Mozilla, Apple, Windows); self-hosted push services can be added with `PUSH_ALLOWED_HOSTS`, and each account may register at most 10 devices
 - Keep the deny-all `firestore.rules` deployed; the app only accesses Firestore from the server
 
+### Abuse protection
+
+- **Rate limits** are shared across all server instances when `UPSTASH_REDIS_REST_URL` and
+  `UPSTASH_REDIS_REST_TOKEN` are set (a free Upstash Redis database is enough). Without them
+  limits are per instance. If Redis is unreachable the app falls back to per-instance limits
+  rather than going down, and logs a warning.
+- **Client IPs** come only from the `x-vercel-forwarded-for` header Vercel sets. Behind your own
+  reverse proxy that overwrites `X-Forwarded-For`, set `TRUST_PROXY=1`; otherwise every
+  anonymous caller shares one bucket.
+- **Guest accounts** can scan and save records, but reminders, dose logging and push
+  notifications require a registered account.
+- **App Check (recommended):** create a reCAPTCHA Enterprise key, register the web app under
+  Firebase Console → App Check, and set `NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY`. That starts
+  *monitor mode*: tokens are verified and failures logged (`App Check would have blocked this
+  request`) but nothing is blocked. Once the logs show real users passing, set
+  `APP_CHECK_ENFORCE=1` to reject sign-ins without a valid token.
+- **User lookups are cached for 30 s** per server instance to save a Google API call on every
+  request. Role changes made with `npm run set-role` and "sign out everywhere" on another
+  instance therefore take up to 30 s to apply (the instance handling the request applies them
+  immediately). Set `AUTH_CACHE_TTL_MS=0` to disable.
+
 ## 🛠 Troubleshooting
 
 ### Camera not working

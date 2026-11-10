@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requirePrescriber();
-    rateLimit(`rx-issue:${user.uid}`, 30, 60_000);
+    await rateLimit(`rx-issue:${user.uid}`, 30, 60_000);
 
     if (!isSigningConfigured()) {
       throw new BackendError("Prescription signing is not set up on this server yet.", 503);

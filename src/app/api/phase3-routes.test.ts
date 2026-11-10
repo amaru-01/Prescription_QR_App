@@ -7,7 +7,7 @@ import { resetSigningKeyCache, signRx } from "@/lib/server/rx-signing";
 
 const { auth, data, rx, reminders, push, adminAuth } = vi.hoisted(() => ({
   adminAuth: { updateUser: vi.fn() },
-  auth: { requireUser: vi.fn(), requirePrescriber: vi.fn() },
+  auth: { requireUser: vi.fn(), requirePrescriber: vi.fn(), requireRegisteredUser: vi.fn(), invalidateUserCache: vi.fn() },
   data: { savePrescription: vi.fn() },
   rx: { issuePrescription: vi.fn(), listIssued: vi.fn(), checkRx: vi.fn() },
   reminders: {
@@ -66,6 +66,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   const user = { uid: `user-${++uidCounter}`, role: "patient", isAnonymous: false };
   auth.requireUser.mockResolvedValue(user);
+  auth.requireRegisteredUser.mockResolvedValue(user);
   auth.requirePrescriber.mockResolvedValue({ ...user, role: "prescriber", name: "Dr Wanjiru" });
   data.savePrescription.mockImplementation(async (_uid, input, options) => ({
     documentId: "doc1",
@@ -215,5 +216,26 @@ describe("PATCH /api/auth/profile", () => {
     const res = await profile.PATCH(post("/api/auth/profile", { name: "Dr. Somebody Else, Chief of Surgery" }, "PATCH"));
     expect(res.status).toBe(403);
     expect(adminAuth.updateUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("guest accounts", () => {
+  const guestBlocked = () =>
+    auth.requireRegisteredUser.mockRejectedValue(new BackendError("Create a free account to use this feature.", 403));
+
+  it("cannot change reminders, log doses or import", async () => {
+    guestBlocked();
+    expect((await reminder.PUT(post("/api/reminders/abc", { time: "08:00", timezone: "UTC" }, "PUT"), params("abc"))).status).toBe(403);
+    expect((await doses.POST(post("/api/reminders/abc/doses", { day: "2026-11-02", taken: true }), params("abc"))).status).toBe(403);
+    expect(reminders.updateReminder).not.toHaveBeenCalled();
+    expect(reminders.setDoseTaken).not.toHaveBeenCalled();
+  });
+
+  it("cannot register push subscriptions", async () => {
+    guestBlocked();
+    push.isPushConfigured.mockReturnValue(true);
+    const body = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "k", auth: "a" } };
+    expect((await subscription.POST(post("/api/push/subscription", body))).status).toBe(403);
+    expect(reminders.savePushSubscription).not.toHaveBeenCalled();
   });
 });
