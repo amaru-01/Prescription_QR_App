@@ -17,7 +17,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v3
+      # init and analyze must be the same version, or analyze fails with a config-version mismatch.
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
       - uses: github/codeql-action/analyze@v4

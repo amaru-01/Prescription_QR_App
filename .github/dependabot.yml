@@ -21,3 +21,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # CodeQL's init and analyze steps must always be on the same version.
+      codeql:
+        patterns: ["github/codeql-action/*"]
