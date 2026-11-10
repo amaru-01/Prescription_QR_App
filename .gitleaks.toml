@@ -1,0 +1,13 @@
+# gitleaks configuration (picked up automatically from the repository root).
+# Keeps gitleaks' built-in rules and only adds the allowlist below.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored third-party code from an early commit"
+paths = [
+  # A Python virtualenv was committed early in the project's history and later removed.
+  # Its library files contain PEM header strings and public CA bundles, which match secret
+  # patterns but are not credentials. Rewriting history just for this is not worth it.
+  '''(^|/)venv/''',
+]
