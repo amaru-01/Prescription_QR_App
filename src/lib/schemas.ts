@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isAllowedPushEndpoint } from "@/lib/push-hosts";
 import type { PrescriptionFieldErrors } from "@/types/prescription";
 
 /**
@@ -100,7 +101,10 @@ export const reminderImportSchema = z.object({
 
 /** POST /api/push/subscription body (a browser PushSubscription as JSON). */
 export const pushSubscriptionSchema = z.object({
-  endpoint: z.url({ protocol: /^https$/ }).max(2048),
+  endpoint: z
+    .url({ protocol: /^https$/ })
+    .max(2048)
+    .refine(isAllowedPushEndpoint, "That push service is not supported."),
   keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(128) }),
 });
 

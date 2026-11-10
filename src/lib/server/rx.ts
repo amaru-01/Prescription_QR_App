@@ -2,6 +2,7 @@ import { Timestamp } from "firebase-admin/firestore";
 
 import type { PrescriptionInput, RxCheck } from "@/types/prescription";
 import type { SessionUser } from "@/types/auth";
+import { BackendError } from "./errors";
 import { getDb } from "./firebase";
 import { newRxId, rxMatches, signRx, verifyRx } from "./rx-signing";
 
@@ -34,7 +35,14 @@ export async function issuePrescription(
   prescriber: SessionUser,
   input: PrescriptionInput
 ): Promise<{ qrText: string; issued: IssuedRx }> {
-  const prescriberName = prescriber.name || prescriber.email || "VeriDose prescriber";
+  // Sign only the name an administrator vouched for, never the self-editable display name.
+  const prescriberName = prescriber.credentialName;
+  if (!prescriberName) {
+    throw new BackendError(
+      "Your prescriber profile has no verified name yet. Ask an administrator to set it before you issue prescriptions.",
+      403
+    );
+  }
   const { token, payload } = signRx({ jti: newRxId(), iss: prescriber.uid, isn: prescriberName, ...input });
 
   const issuedAt = Timestamp.fromMillis(payload.iat * 1000);

@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 /**
- * Grant or remove prescriber access (Firebase custom claim `role`).
+ * Grant or remove prescriber access (Firebase custom claims `role` and `credentialName`).
  *
- *   node scripts/set-role.mjs --email doctor@example.com --role prescriber
+ *   node scripts/set-role.mjs --email doctor@example.com --role prescriber --name "Dr. Jane Smith"
+ *   node scripts/set-role.mjs --email doctor@example.com --role prescriber --name "Dr. Jane Smith, MD"  (rename)
  *   node scripts/set-role.mjs --email doctor@example.com --role patient
  *
  * Takes effect on the user's next request; no sign-out needed. Only grant
- * prescriber to people whose credentials you have checked: their name
- * appears as the signer on every code they issue.
+ * prescriber to people whose credentials you have checked: `--name` is what
+ * patients see as the signer of every code they issue, and prescribers cannot
+ * change it themselves. The account's email must be verified. Every change is
+ * recorded in the Firestore collection `admin_audit`.
  */
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import os from "node:os";
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -44,19 +49,46 @@ function loadServiceAccount() {
 async function main() {
   const email = option("email");
   const role = option("role");
+  const name = option("name")?.trim();
   if (!email || !["prescriber", "patient"].includes(role)) {
-    console.error("Usage: node scripts/set-role.mjs --email <address> --role prescriber|patient");
+    console.error('Usage: node scripts/set-role.mjs --email <address> --role prescriber|patient [--name "Dr. Jane Smith"]');
+    process.exit(1);
+  }
+  if (role === "prescriber" && (!name || name.length < 2 || name.length > 80)) {
+    console.error('Granting prescriber requires --name "<verified name>" (2-80 characters).');
     process.exit(1);
   }
 
   initializeApp({ credential: cert(loadServiceAccount()) });
   const user = await getAuth().getUserByEmail(email);
-  const claims = { ...(user.customClaims ?? {}) };
-  if (role === "prescriber") claims.role = "prescriber";
-  else delete claims.role;
+  if (role === "prescriber" && !user.emailVerified) {
+    console.error(`${email} has not verified their email address yet. Ask them to verify it, then retry.`);
+    process.exit(1);
+  }
+
+  const before = user.customClaims ?? {};
+  const claims = { ...before };
+  if (role === "prescriber") {
+    claims.role = "prescriber";
+    claims.credentialName = name;
+  } else {
+    delete claims.role;
+    delete claims.credentialName;
+  }
 
   await getAuth().setCustomUserClaims(user.uid, claims);
-  console.log(`${email} [${user.uid}] is now: ${role}`);
+  await getFirestore().collection("admin_audit").add({
+    action: "set-role",
+    target_uid: user.uid,
+    target_email: email,
+    role,
+    credential_name: role === "prescriber" ? name : null,
+    previous_role: before.role ?? "patient",
+    previous_credential_name: before.credentialName ?? null,
+    by: os.userInfo().username,
+    at: FieldValue.serverTimestamp(),
+  });
+  console.log(`${email} [${user.uid}] is now: ${role}${role === "prescriber" ? ` (signs as "${name}")` : ""}`);
 }
 
 main().catch((error) => {

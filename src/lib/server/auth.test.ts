@@ -58,7 +58,23 @@ describe("getSessionUser", () => {
       emailVerified: true,
       isAnonymous: false,
       role: "patient",
+      credentialName: null,
     });
+  });
+
+  it("reads the vouched credential name from custom claims", async () => {
+    signedIn({ user: { customClaims: { role: "prescriber", credentialName: "  Dr. Jane Smith " } } });
+    await expect(getSessionUser()).resolves.toMatchObject({ credentialName: "Dr. Jane Smith" });
+  });
+
+  it("ignores malformed credential names", async () => {
+    signedIn({ user: { customClaims: { role: "prescriber", credentialName: 42 } } });
+    await expect(getSessionUser()).resolves.toMatchObject({ credentialName: null });
+  });
+
+  it("does not use the editable display name as the credential name", async () => {
+    signedIn({ user: { displayName: "Dr. Impostor", customClaims: { role: "prescriber" } } });
+    await expect(getSessionUser()).resolves.toMatchObject({ name: "Dr. Impostor", credentialName: null });
   });
 
   it("reads the prescriber role from custom claims", async () => {
@@ -113,6 +129,11 @@ describe("requireUser / requirePageUser", () => {
 });
 
 describe("requirePrescriber", () => {
+  it("rejects prescribers whose email is not verified", async () => {
+    signedIn({ user: { emailVerified: false, customClaims: { role: "prescriber" } } });
+    await expect(requirePrescriber()).rejects.toMatchObject({ statusCode: 403 });
+  });
+
   it("allows prescribers", async () => {
     signedIn({ user: { customClaims: { role: "prescriber" } } });
     await expect(requirePrescriber()).resolves.toMatchObject({ uid: "u1", role: "prescriber" });

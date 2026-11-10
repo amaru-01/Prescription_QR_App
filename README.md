@@ -267,9 +267,15 @@ Setup:
 
 1. `npm run generate:keys` and put `RX_SIGNING_PRIVATE_KEY` in `.env` and your host's
    environment settings (server-only secret).
-2. Grant prescriber access to accounts you have vetted:
-   `npm run set-role -- --email doctor@example.com --role prescriber`
-   (`--role patient` removes it). Their display name is printed as the signer.
+2. Grant prescriber access to accounts you have vetted. The account's email must be
+   verified, and `--name` is the name patients see as the signer of every code:
+   `npm run set-role -- --email doctor@example.com --role prescriber --name "Dr. Jane Smith"`
+   (`--role patient` removes it). Prescribers cannot change this name themselves, and a
+   prescriber without it cannot issue codes. Each change is recorded in the Firestore
+   collection `admin_audit`.
+
+   **Upgrading from an earlier version?** Existing prescribers must be re-granted once with
+   `--name`; until then issuing returns a clear 403.
 
 Rotating `RX_SIGNING_PRIVATE_KEY` makes codes that haven't been saved yet unverifiable;
 already-saved records keep their verified status.
@@ -386,7 +392,8 @@ my_prescription_app/
 - Never commit `.env` or Firebase service account JSON files
 - Rotate service account keys periodically
 - Keep `RX_SIGNING_PRIVATE_KEY`, `VAPID_PRIVATE_KEY` and `CRON_SECRET` server-side only
-- Only grant the prescriber role to vetted accounts
+- Only grant the prescriber role to vetted accounts, with a verified email and a `--name` you checked
+- Push subscriptions are accepted only from known push services (FCM, Mozilla, Apple, Windows); self-hosted push services can be added with `PUSH_ALLOWED_HOSTS`, and each account may register at most 10 devices
 - Keep the deny-all `firestore.rules` deployed; the app only accesses Firestore from the server
 
 ## 🛠 Troubleshooting

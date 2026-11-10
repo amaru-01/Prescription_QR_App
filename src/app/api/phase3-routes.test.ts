@@ -5,7 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { BackendError } from "@/lib/server/errors";
 import { resetSigningKeyCache, signRx } from "@/lib/server/rx-signing";
 
-const { auth, data, rx, reminders, push } = vi.hoisted(() => ({
+const { auth, data, rx, reminders, push, adminAuth } = vi.hoisted(() => ({
+  adminAuth: { updateUser: vi.fn() },
   auth: { requireUser: vi.fn(), requirePrescriber: vi.fn() },
   data: { savePrescription: vi.fn() },
   rx: { issuePrescription: vi.fn(), listIssued: vi.fn(), checkRx: vi.fn() },
@@ -24,6 +25,7 @@ vi.mock("@/lib/server/prescriptions", () => data);
 vi.mock("@/lib/server/rx", () => rx);
 vi.mock("@/lib/server/reminders", () => reminders);
 vi.mock("@/lib/server/push", () => push);
+vi.mock("@/lib/server/firebase", () => ({ getAdminAuth: () => adminAuth }));
 vi.mock("@/lib/server/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 const save = await import("./save/route");
@@ -32,6 +34,7 @@ const cron = await import("./cron/reminders/route");
 const reminder = await import("./reminders/[id]/route");
 const doses = await import("./reminders/[id]/doses/route");
 const subscription = await import("./push/subscription/route");
+const profile = await import("./auth/profile/route");
 
 const ORIGIN = "https://veridose.app";
 const signed = { med: "Amoxicillin", dose: "500mg", duration: "7 days" };
@@ -182,9 +185,35 @@ describe("reminder and push routes", () => {
     expect(reminders.savePushSubscription).toHaveBeenCalled();
   });
 
+  it("rejects https endpoints that are not a known push service", async () => {
+    push.isPushConfigured.mockReturnValue(true);
+    for (const endpoint of ["https://169.254.169.254/latest", "https://fcm.googleapis.com.evil.com/x", "https://example.com/hook"]) {
+      const res = await subscription.POST(post("/api/push/subscription", { endpoint, keys: { p256dh: "k", auth: "a" } }));
+      expect(res.status).toBe(422);
+    }
+    expect(reminders.savePushSubscription).not.toHaveBeenCalled();
+  });
+
   it("reports when push is not configured", async () => {
     push.isPushConfigured.mockReturnValue(false);
     const good = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "k", auth: "a" } };
     expect((await subscription.POST(post("/api/push/subscription", good))).status).toBe(503);
+  });
+});
+
+describe("PATCH /api/auth/profile", () => {
+  it("lets patients change their display name", async () => {
+    auth.requireUser.mockResolvedValue({ uid: "p1", role: "patient", isAnonymous: false, name: "Pat" });
+    adminAuth.updateUser.mockResolvedValue(undefined);
+    const res = await profile.PATCH(post("/api/auth/profile", { name: "Pat Jones" }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect(adminAuth.updateUser).toHaveBeenCalledWith("p1", { displayName: "Pat Jones" });
+  });
+
+  it("does not let prescribers rename themselves", async () => {
+    auth.requireUser.mockResolvedValue({ uid: "d1", role: "prescriber", isAnonymous: false, name: "Dr Wanjiru" });
+    const res = await profile.PATCH(post("/api/auth/profile", { name: "Dr. Somebody Else, Chief of Surgery" }, "PATCH"));
+    expect(res.status).toBe(403);
+    expect(adminAuth.updateUser).not.toHaveBeenCalled();
   });
 });

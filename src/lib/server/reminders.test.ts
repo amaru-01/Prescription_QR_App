@@ -72,7 +72,7 @@ function dueReminder(
   return { update };
 }
 
-function subscribe(uid: string, endpoint = `https://push.example/${uid}`) {
+function subscribe(uid: string, endpoint = `https://fcm.googleapis.com/fcm/send/${uid}`) {
   const remove = vi.fn(async () => undefined);
   fake.subscriptions.set(uid, [...(fake.subscriptions.get(uid) ?? []), { endpoint, keys: { p256dh: "k", auth: "a" }, delete: remove }]);
   return remove;
@@ -137,8 +137,8 @@ describe("runDueReminders", () => {
 
   it("removes subscriptions the push service reports as gone", async () => {
     dueReminder("u1", "rx1");
-    const removeGone = subscribe("u1", "https://push.example/gone");
-    const removeLive = subscribe("u1", "https://push.example/live");
+    const removeGone = subscribe("u1", "https://fcm.googleapis.com/fcm/send/gone");
+    const removeLive = subscribe("u1", "https://fcm.googleapis.com/fcm/send/live");
     const send = vi.fn(async (sub: { endpoint: string }) => (sub.endpoint.endsWith("gone") ? "gone" : "sent") as "gone" | "sent");
 
     expect((await runDueReminders(send, NOW)).sent).toBe(1);

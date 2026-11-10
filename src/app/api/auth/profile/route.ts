@@ -12,6 +12,10 @@ export async function PATCH(request: Request) {
     const user = await requireUser();
     rateLimit(`profile:${user.uid}`, 10, 60_000);
 
+    if (user.role === "prescriber") {
+      throw new BackendError("A prescriber's name is managed by an administrator and cannot be changed here.", 403);
+    }
+
     const body = await readJsonBody(request);
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (name.length < 2 || name.length > 60) {
