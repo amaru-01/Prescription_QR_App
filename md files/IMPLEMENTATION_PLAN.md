@@ -153,13 +153,13 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 **Goal:** know when something breaks before users do.
 
 **Tasks**
-1. Logging (#12): add a request id to every log line (header `x-request-id` or generated); log security events at `warn` — failed session exchange, 403 on issue/revoke, claim conflicts, rate-limit hits, App Check rejections — with uid and IP hash, never prescription contents.
-2. Error tracking: add Sentry (or equivalent) with PII scrubbing; source maps uploaded in CI.
-3. Health (#11): real Firestore ping with 2 s timeout in `getHealth`; rate-limit it; keep `/health` as an alias; drop the alias if no monitor uses it.
-4. Cron: add `crons` to `vercel.json` (if on a plan allowing 10-minute crons) or document the external scheduler; add an uptime check that alerts if the cron hasn't succeeded for 30 min (e.g. cron endpoint writes `meta/cron.lastSuccess`, health reads it).
-5. Set the Vercel function region next to the Firestore region.
-6. Tests (#13): Firestore rules tests with the emulator (deny-all verified for read/write/list from an authenticated client); Playwright smoke test for login → scan manual entry → save → history; coverage threshold (start at current − 2 %, ratchet up); a perf test of `runDueReminders` at 1,000 docs against the emulator.
-7. Session lifetime review: decide whether to shorten from 5 days.
+1. Logging (#12): **Done.** Request id on every log line and `X-Request-Id` on every API response (same id as the 500 body's `request_id`); security events at `warn` with a stable `event` name, uid and a salted IP hash (`LOG_IP_SALT`).
+2. Error tracking: **Partly done / deferred.** `src/instrumentation.ts` logs unhandled errors with route and digest. The Sentry SDK is not added: it needs an account and DSN, a new dependency, source-map upload and CSP changes. Add it from the `onRequestError` hook when wanted.
+3. Health (#11): **Done.** Real Firestore read with a 2 s timeout; rate-limited; `/health` alias kept.
+4. Cron: **Done, except the scheduler itself.** Each successful run writes `meta/reminders-cron`; `GET /api/health?cron=1` returns 503 when no run succeeded for 30 min (`CRON_STALE_MINUTES`). `vercel.json` still has no `crons` (Hobby plans only allow daily crons): use an external scheduler or add it on a plan that allows it.
+5. Set the Vercel function region next to the Firestore region: **Not done** (a Vercel project setting; I don't know the Firestore region). Documented in the README.
+6. Tests (#13): **Mostly done.** Coverage thresholds set (65/65/60/65, measured 67/67/63/67); Firestore rules tests written (`npm run test:rules`) and wired into CI with Java 21 — **not yet run** (the dev machine has Java 17; first CI run is the real test); a static guard that `firestore.rules` stays deny-all runs in every `npm test`. **Deferred:** Playwright login→scan→save→history smoke test (needs real sign-in credentials or the Auth emulator and browser downloads in CI) and a 1,000-doc emulator perf test (the unit tests already drain a 450-reminder backlog).
+7. Session lifetime review: **Done.** Configurable with `SESSION_MAX_AGE_DAYS` (1–14); default left at 5. Recommendation for health data: 2.
 
 **Acceptance:** an induced failure (kill Firestore creds in preview) pages within 5 minutes; rules tests and e2e smoke run in CI.
 **Rollback:** all additive; revert per feature.

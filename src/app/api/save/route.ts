@@ -5,6 +5,7 @@ import { rxMatches, verifyRx } from "@/lib/server/rx-signing";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { saveRequestSchema } from "@/lib/schemas";
 import type { RxCheck } from "@/types/prescription";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
  * another account. Otherwise it is saved as an ordinary (unverified) record
  * and the response's `rx` says why, so the UI can explain.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -52,3 +53,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

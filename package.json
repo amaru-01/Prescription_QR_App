@@ -10,6 +10,8 @@
     "migrate:prescriptions": "node scripts/migrate-prescriptions.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:rules": "npx --yes firebase-tools@15.35.0 emulators:exec --only firestore --project demo-veridose-rules \"vitest run --config vitest.rules.config.ts\"",
     "generate:keys": "node scripts/generate-keys.mjs",
     "set-role": "node scripts/set-role.mjs",
     "backfill:retention": "node scripts/backfill-retention.mjs"
@@ -31,11 +33,13 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
     "@tailwindcss/postcss": "4.3.5",
     "@types/node": "22.19.15",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@types/web-push": "^3.6.4",
+    "@vitest/coverage-v8": "5.1.0",
     "eslint": "10.14.0",
     "eslint-config-next": "16.4.6",
     "postcss": "8.5.32",

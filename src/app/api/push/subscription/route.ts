@@ -4,11 +4,12 @@ import { isPushConfigured } from "@/lib/server/push";
 import { deletePushSubscription, savePushSubscription } from "@/lib/server/reminders";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { pushSubscriptionSchema, pushUnsubscribeSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 /** POST /api/push/subscription — Body: PushSubscription JSON from this browser. */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireRegisteredUser();
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
 }
 
 /** DELETE /api/push/subscription — Body: { endpoint }. Stops notifications to that browser. */
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -35,3 +36,6 @@ export async function DELETE(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);
+export const DELETE = withRequest(handleDELETE);

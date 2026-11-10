@@ -96,6 +96,8 @@ export interface HealthResponse {
   firebase: string;
   timestamp: string;
   storage: string;
+  /** Reminder scheduler freshness; only present when asked for (`?cron=1`). */
+  reminders?: { status: "ok" | "stale" | "unknown"; lastSuccessAt: string | null; minutesSinceLastRun: number | null };
 }
 
 export interface ApiErrorPayload {

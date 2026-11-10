@@ -5,6 +5,7 @@ import type { SessionUser } from "@/types/auth";
 import { BackendError } from "./errors";
 import { getDb } from "./firebase";
 import { generatePin, hashPin } from "./rx-pin";
+import { securityEvent } from "./security-log";
 import {
   newRxId,
   RX_CLAIM_WINDOW_SECONDS,
@@ -146,6 +147,7 @@ export async function revokeIssued(prescriberUid: string, rxId: string): Promise
     }
     if (!doc.get("revoked_at")) tx.update(ref, { revoked_at: FieldValue.serverTimestamp() });
   });
+  securityEvent("code_revoked", { rxId });
 }
 
 /**

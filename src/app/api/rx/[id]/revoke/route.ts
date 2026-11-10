@@ -3,6 +3,7 @@ import { BackendError, errorResponse } from "@/lib/server/errors";
 import { revokeIssued } from "@/lib/server/rx";
 import { assertSameOrigin, rateLimit } from "@/lib/server/security";
 import { documentIdSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ type Context = { params: Promise<{ id: string }> };
  * Only the issuing prescriber's own codes are reachable (the lookup is scoped
  * to their uid), and a code a patient already saved cannot be revoked.
  */
-export async function POST(request: Request, context: Context) {
+async function handlePOST(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requirePrescriber();
@@ -28,3 +29,5 @@ export async function POST(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

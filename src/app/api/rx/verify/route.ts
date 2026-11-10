@@ -3,6 +3,7 @@ import { errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { checkRx } from "@/lib/server/rx";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { rxVerifyRequestSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
  * POST /api/rx/verify — Body: { rx, med, dose, duration }
  * Advisory check for the review screen. Saving re-verifies and claims atomically.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -23,3 +24,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

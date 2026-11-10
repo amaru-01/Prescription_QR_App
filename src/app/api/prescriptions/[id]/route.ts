@@ -7,6 +7,7 @@ import {
 } from "@/lib/server/prescriptions";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { documentIdSchema, updateRequestSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ async function prescriptionId(context: Context): Promise<string> {
   return id;
 }
 
-export async function GET(_request: Request, context: Context) {
+async function handleGET(_request: Request, context: Context) {
   try {
     const user = await requireUser();
     await rateLimit(`read:${user.uid}`, 120, 60_000);
@@ -30,7 +31,7 @@ export async function GET(_request: Request, context: Context) {
   }
 }
 
-export async function PATCH(request: Request, context: Context) {
+async function handlePATCH(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -46,7 +47,7 @@ export async function PATCH(request: Request, context: Context) {
   }
 }
 
-export async function DELETE(request: Request, context: Context) {
+async function handleDELETE(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -58,3 +59,7 @@ export async function DELETE(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
+
+export const GET = withRequest(handleGET);
+export const PATCH = withRequest(handlePATCH);
+export const DELETE = withRequest(handleDELETE);

@@ -3,6 +3,8 @@ import type { z } from "zod";
 import { fieldErrorsFrom, firstMessage } from "@/lib/schemas";
 import type { PrescriptionFieldErrors } from "@/types/prescription";
 import { logger } from "./logger";
+import { currentContext } from "./request-context";
+import { securityEvent } from "./security-log";
 
 /**
  * Custom error class for backend errors. Its message is safe to show to users;
@@ -48,6 +50,9 @@ export function parseOrThrow<T extends z.ZodType>(
 export function errorResponse(error: unknown): Response {
   if (error instanceof BackendError) {
     if (error.statusCode >= 500) logger.error("API error", { status: error.statusCode, error });
+    // Refusals worth alerting on. 401s are left out: expired sessions are routine.
+    else if (error.statusCode === 403) securityEvent("forbidden", { status: 403, reason: error.message });
+    else if (error.statusCode === 429) securityEvent("rate_limited", { status: 429 });
     return Response.json(
       {
         success: false,
@@ -62,7 +67,8 @@ export function errorResponse(error: unknown): Response {
   }
 
   // Unexpected failures: log the details server-side, return only a reference id.
-  const requestId = crypto.randomUUID();
+  // The same id the response header and every other log line for this request carry.
+  const requestId = currentContext()?.requestId ?? crypto.randomUUID();
   logger.error("Unhandled API error", { requestId, error });
 
   return Response.json(

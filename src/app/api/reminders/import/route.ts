@@ -3,11 +3,12 @@ import { errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { importReminders } from "@/lib/server/reminders";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { reminderImportSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 /** POST /api/reminders/import — one-time move of on-device reminders to the account. */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireRegisteredUser();
@@ -20,3 +21,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

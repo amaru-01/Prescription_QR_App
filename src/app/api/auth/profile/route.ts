@@ -2,11 +2,12 @@ import { invalidateUserCache, requireUser } from "@/lib/server/auth";
 import { BackendError, errorResponse } from "@/lib/server/errors";
 import { getAdminAuth } from "@/lib/server/firebase";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 /** PATCH /api/auth/profile — Body: { name }. Updates the account display name. */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -29,3 +30,5 @@ export async function PATCH(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const PATCH = withRequest(handlePATCH);

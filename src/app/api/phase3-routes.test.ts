@@ -12,6 +12,7 @@ const { auth, data, rx, reminders, push, adminAuth } = vi.hoisted(() => ({
   rx: { issuePrescription: vi.fn(), listIssued: vi.fn(), checkRx: vi.fn(), revokeIssued: vi.fn() },
   reminders: {
     runDueReminders: vi.fn(),
+    recordCronSuccess: vi.fn(),
     updateReminder: vi.fn(),
     setDoseTaken: vi.fn(),
     savePushSubscription: vi.fn(),
@@ -228,6 +229,37 @@ describe("/api/cron/reminders", () => {
     const res = await call("Bearer s3cret-value");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, due: 2, sent: 1, sentSubscriptions: 1, skipped: 1, failed: 0, retried: 0 });
+  });
+
+  it("records each successful run so monitoring can tell when the scheduler stops", async () => {
+    process.env.CRON_SECRET = "s3cret-value";
+    push.isPushConfigured.mockReturnValue(true);
+    const result = { due: 0, sent: 0, sentSubscriptions: 0, skipped: 0, failed: 0, retried: 0 };
+    reminders.runDueReminders.mockResolvedValue(result);
+    await call("Bearer s3cret-value");
+    expect(reminders.recordCronSuccess).toHaveBeenCalledWith(result);
+  });
+
+  it("does not fail a run that worked just because recording it failed", async () => {
+    process.env.CRON_SECRET = "s3cret-value";
+    push.isPushConfigured.mockReturnValue(true);
+    reminders.runDueReminders.mockResolvedValue({ due: 1, sent: 1, sentSubscriptions: 1, skipped: 0, failed: 0, retried: 0 });
+    reminders.recordCronSuccess.mockRejectedValue(new Error("firestore down"));
+    expect((await call("Bearer s3cret-value")).status).toBe(200);
+  });
+
+  it("does not record a run that failed", async () => {
+    process.env.CRON_SECRET = "s3cret-value";
+    push.isPushConfigured.mockReturnValue(true);
+    reminders.runDueReminders.mockRejectedValue(new Error("boom"));
+    expect((await call("Bearer s3cret-value")).status).toBe(500);
+    expect(reminders.recordCronSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not record when the caller is not authorised", async () => {
+    process.env.CRON_SECRET = "s3cret-value";
+    await call("Bearer wrong");
+    expect(reminders.recordCronSuccess).not.toHaveBeenCalled();
   });
 });
 
