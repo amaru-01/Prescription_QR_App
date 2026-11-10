@@ -5,6 +5,15 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # web-push 4 depends on an ES-module-only package, so require() of it throws
+      # ERR_REQUIRE_ESM on Vercel (the CI "require(esm)" step catches this). Stay on 3.x
+      # until web-push ships a CommonJS-compatible release.
+      - dependency-name: "web-push"
+        update-types: ["version-update:semver-major"]
+      # The app runs on Node 22 (see engines); keep the types in step with it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types: [minor, patch]
