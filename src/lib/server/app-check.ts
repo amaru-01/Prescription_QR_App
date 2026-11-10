@@ -3,6 +3,7 @@ import { getAppCheck } from "firebase-admin/app-check";
 import { BackendError } from "./errors";
 import { initializeFirebase } from "./firebase";
 import { logger } from "./logger";
+import { securityEvent } from "./security-log";
 
 /** Header the Firebase web SDK's App Check token is sent in. */
 export const APP_CHECK_HEADER = "x-firebase-appcheck";
@@ -41,8 +42,8 @@ export async function assertAppCheck(request: Request): Promise<void> {
   }
 
   if (!failure) return;
+  securityEvent("app_check_rejected", { reason: failure, mode });
   if (mode === "enforce") {
     throw new BackendError("We couldn't verify this request came from the app. Reload the page and try again.", 403);
   }
-  logger.warn("App Check would have blocked this request (monitor mode)", { reason: failure });
 }

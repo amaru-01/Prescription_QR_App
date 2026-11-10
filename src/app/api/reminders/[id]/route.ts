@@ -3,13 +3,14 @@ import { BackendError, errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { updateReminder } from "@/lib/server/reminders";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { documentIdSchema, reminderUpdateSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
 /** PUT /api/reminders/[id] — Body: { timezone, time?, notify? } */
-export async function PUT(request: Request, context: Context) {
+async function handlePUT(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireRegisteredUser();
@@ -25,3 +26,5 @@ export async function PUT(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
+
+export const PUT = withRequest(handlePUT);

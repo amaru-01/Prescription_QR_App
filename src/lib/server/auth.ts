@@ -7,13 +7,24 @@ import type { SessionUser } from "@/types/auth";
 import { BackendError } from "./errors";
 import type { UserRecord } from "firebase-admin/auth";
 import { getAdminAuth } from "./firebase";
+import { setContextUser } from "./request-context";
 
 export { SESSION_COOKIE };
 
 const isProduction = process.env.NODE_ENV === "production";
 
-/** Session lifetime. Firebase allows between 5 minutes and 14 days. */
-export const SESSION_MAX_AGE_SECONDS = 5 * 24 * 60 * 60;
+/**
+ * Session lifetime: SESSION_MAX_AGE_DAYS (1-14, default 5). Shorter is safer for
+ * an app holding health data, since a stolen cookie stays useful for less time
+ * (2 days is a reasonable choice); longer means fewer sign-ins. Firebase itself
+ * allows 5 minutes to 14 days.
+ */
+function sessionMaxAgeSeconds(): number {
+  const days = Number(process.env.SESSION_MAX_AGE_DAYS);
+  const valid = process.env.SESSION_MAX_AGE_DAYS !== undefined && Number.isFinite(days) && days >= 1 && days <= 14;
+  return Math.round((valid ? days : 5) * 24 * 60 * 60);
+}
+export const SESSION_MAX_AGE_SECONDS = sessionMaxAgeSeconds();
 
 /** A sign-in must be this recent to be exchanged for a session cookie. */
 const MAX_SIGN_IN_AGE_SECONDS = 5 * 60;
@@ -112,6 +123,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) throw new BackendError("Please log in to continue.", 401);
+  setContextUser(user.uid);
   return user;
 }
 

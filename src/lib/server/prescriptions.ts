@@ -21,8 +21,10 @@ import type {
   PrescriptionVerification,
   RxCheck,
 } from "@/types/prescription";
-import { readReminder, stageReminderDelete, stageReminderStatusChange } from "./reminders";
+import { logger } from "./logger";
+import { getCronStatus, readReminder, stageReminderDelete, stageReminderStatusChange } from "./reminders";
 import { MAX_PIN_ATTEMPTS, pinMatches } from "./rx-pin";
+import { securityEvent } from "./security-log";
 import { RX_RECORD_RETENTION_SECONDS, type RxPayload } from "./rx-signing";
 
 export { MAX_LIST_LIMIT };
@@ -72,16 +74,41 @@ function toVerification(value: unknown): PrescriptionVerification | null {
   };
 }
 
+/** How long a health check waits for Firestore before calling it unreachable. */
+const HEALTH_TIMEOUT_MS = 2_000;
+
+/** Reject if `work` takes longer than `ms`, without leaving the timer running. */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out after ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * Health status. Reports whether the Admin SDK could be initialised; it does
- * not expose any configuration details.
+ * Health status. `ok` means Firestore actually answered a read within a couple
+ * of seconds (not merely that the client could be constructed); it exposes no
+ * configuration details. With `includeCron`, also reports whether the reminder
+ * scheduler has run recently, which is kept out of `ok` so a stalled scheduler
+ * never shows users "connection unavailable".
  */
-export async function getHealth(): Promise<HealthResponse> {
+export async function getHealth({ includeCron = false } = {}): Promise<HealthResponse> {
   const timestamp = new Date().toISOString();
   try {
-    getDb();
-    return { ok: true, status: "healthy", firebase: "connected", timestamp, storage: "firebase" };
-  } catch {
+    const db = getDb();
+    await withTimeout(db.collection("_health").doc("ping").get(), HEALTH_TIMEOUT_MS);
+    const healthy: HealthResponse = { ok: true, status: "healthy", firebase: "connected", timestamp, storage: "firebase" };
+    if (includeCron) healthy.reminders = await withTimeout(getCronStatus(), HEALTH_TIMEOUT_MS);
+    return healthy;
+  } catch (error) {
+    logger.warn("Health check failed", { error });
     return { ok: false, status: "unhealthy", firebase: "disconnected", timestamp, storage: "firebase" };
   }
 }
@@ -226,7 +253,7 @@ export async function savePrescription(
   };
 
   // A refusal is returned, not thrown, so the failed-PIN counter still commits.
-  type Outcome = { check: RxCheck } | { refuse: BackendError };
+  type Outcome = { check: RxCheck } | { refuse: BackendError; event?: "pin_failed" | "pin_locked" };
   const outcome = await db.runTransaction(async (tx): Promise<Outcome> => {
     if (!rx) {
       tx.set(docRef, { ...base, verification: null });
@@ -263,6 +290,7 @@ export async function savePrescription(
         tx.update(issuedRef, { pin_attempts: attempts, ...(locked ? { locked_at: FieldValue.serverTimestamp() } : {}) });
         const left = MAX_PIN_ATTEMPTS - attempts;
         return {
+          event: locked ? "pin_locked" : "pin_failed",
           refuse: locked
             ? new BackendError("Too many wrong PINs. This code is now locked; ask your prescriber for a new one.", 403)
             : new BackendError(`That PIN doesn't match. ${left} ${left === 1 ? "attempt" : "attempts"} left.`, 403),
@@ -294,8 +322,12 @@ export async function savePrescription(
     };
   });
 
-  if ("refuse" in outcome) throw outcome.refuse;
+  if ("refuse" in outcome) {
+    if (outcome.event) securityEvent(outcome.event, { rxId: rx?.jti });
+    throw outcome.refuse;
+  }
   const rxCheck = outcome.check;
+  if (rx && rxCheck.status === "invalid") securityEvent("claim_conflict", { rxId: rx.jti, reason: rxCheck.reason });
 
   invalidateStatsCache(uid);
   return {

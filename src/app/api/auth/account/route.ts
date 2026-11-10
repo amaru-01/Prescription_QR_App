@@ -6,6 +6,8 @@ import { errorResponse } from "@/lib/server/errors";
 import { getAdminAuth } from "@/lib/server/firebase";
 import { invalidateStatsCache } from "@/lib/server/prescriptions";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
+import { securityEvent } from "@/lib/server/security-log";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,7 +19,7 @@ export const maxDuration = 60;
  * minutes (the client asks for the password again), so a stolen session cookie
  * alone cannot wipe an account. Guest accounts have no password and send `{}`.
  */
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
@@ -30,6 +32,7 @@ export async function DELETE(request: Request) {
     await deleteAccountData(user.uid);
     await getAdminAuth().deleteUser(user.uid);
 
+    securityEvent("account_deleted", { guest: user.isAnonymous });
     invalidateUserCache(user.uid);
     invalidateStatsCache(user.uid);
     const cookieStore = await cookies();
@@ -40,3 +43,5 @@ export async function DELETE(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const DELETE = withRequest(handleDELETE);

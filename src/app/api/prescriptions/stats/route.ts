@@ -2,11 +2,12 @@ import { requireUser } from "@/lib/server/auth";
 import { errorResponse } from "@/lib/server/errors";
 import { getPrescriptionStats } from "@/lib/server/prescriptions";
 import { rateLimit } from "@/lib/server/security";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/prescriptions/stats — totals across all of the user's records. */
-export async function GET() {
+async function handleGET() {
   try {
     const user = await requireUser();
     await rateLimit(`read:${user.uid}`, 120, 60_000);
@@ -16,3 +17,5 @@ export async function GET() {
     return errorResponse(error);
   }
 }
+
+export const GET = withRequest(handleGET);

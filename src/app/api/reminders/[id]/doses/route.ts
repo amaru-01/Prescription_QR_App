@@ -3,13 +3,14 @@ import { BackendError, errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { setDoseTaken } from "@/lib/server/reminders";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { documentIdSchema, doseRequestSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
 /** POST /api/reminders/[id]/doses — Body: { day: "YYYY-MM-DD", taken: boolean } */
-export async function POST(request: Request, context: Context) {
+async function handlePOST(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireRegisteredUser();
@@ -25,3 +26,5 @@ export async function POST(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

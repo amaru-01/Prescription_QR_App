@@ -441,6 +441,62 @@ my_prescription_app/
   instance therefore take up to 30 s to apply (the instance handling the request applies them
   immediately). Set `AUTH_CACHE_TTL_MS=0` to disable.
 
+### Monitoring and operations
+
+**Finding what went wrong.** Every API response carries an `X-Request-Id` header, and a failed
+request's JSON body has the same value as `request_id`. Every log line written while handling
+that request contains it too, together with `method`, `path` and (once signed in) `uid`. When a
+user reports a problem, ask for the `request_id` (or read the header in the browser's network
+tab) and search your logs for it. Logs are one JSON object per line; they never contain
+prescription contents, tokens, PINs or raw IP addresses.
+
+**Security events.** These are logged at `warn` with a stable `event` field, so they can be
+searched and alerted on in Vercel logs or any log drain:
+
+| `event` | Means |
+|---------|-------|
+| `forbidden` | A request was refused with 403 (wrong role, guest on a registered-only route, cross-site request) |
+| `rate_limited` | A client hit a rate limit (429) |
+| `session_exchange_failed` | A sign-in token could not be turned into a session |
+| `app_check_rejected` | App Check token missing or invalid (`mode` says monitor or enforce) |
+| `claim_conflict` | A code was already claimed, withdrawn or locked |
+| `pin_failed` / `pin_locked` | A wrong one-time PIN / the code was locked after too many |
+| `code_revoked`, `account_deleted` | A prescriber withdrew a code / an account was deleted |
+
+Each carries `ipHash`, a short salted hash of the client address: enough to see that one source is
+behind a burst, not enough to identify a person. **Set `LOG_IP_SALT` to a long random secret**,
+otherwise the hash uses a public default and could be reversed by brute force. A spike in
+`rate_limited` or `pin_failed` from one `ipHash` is the signal to look at.
+
+**Uptime monitoring.** Point an external monitor (UptimeRobot, Better Stack, ...) at two URLs:
+
+- `GET /api/health`: `200` when Firestore answers a real read within 2 seconds, `503` otherwise.
+  This is the check the Settings page uses.
+- `GET /api/health?cron=1`: additionally fails (`503`) when the reminder scheduler has not run
+  successfully for 30 minutes, so you hear about missing reminders before patients do. Change the
+  limit with `CRON_STALE_MINUTES` (`0` turns it off). Until the scheduler has run once it reports
+  `unknown` and stays green, so setups without a scheduler are not flagged.
+
+**Unhandled errors.** Errors that escape a page render are logged as `Unhandled request error`
+with the route and digest (`src/instrumentation.ts`). To also send errors to a service such as
+Sentry, install its Next.js SDK and call it from that hook; the logs are the source of truth until
+then.
+
+**Settings that affect security and operations** (all optional, see `.env.example`):
+`LOG_IP_SALT`, `SESSION_MAX_AGE_DAYS` (1-14, default 5; **2 is a good choice for health data**, since
+a stolen cookie then stays useful for less time), `CRON_STALE_MINUTES`.
+
+**Deployment notes.**
+- Hobby plans only allow daily Vercel crons, so `vercel.json` does not define one. Use an external
+  scheduler for `/api/cron/reminders` every 5-15 minutes (see Reminders above), or add
+  `{"crons":[{"path":"/api/cron/reminders","schedule":"*/10 * * * *"}]}` on a plan that allows it.
+- For lower latency, pin the Vercel function region to the one closest to your Firestore database
+  (Project Settings → Functions → Region). The database region is shown in the Firebase console.
+
+**Tests.** `npm run test:coverage` runs the unit and route tests with coverage thresholds (CI
+fails if coverage drops). `npm run test:rules` runs the Firestore security-rules tests against the
+local emulator; it needs Java 17+ and downloads the emulator on first use. CI runs both.
+
 ## 🛠 Troubleshooting
 
 ### Camera not working

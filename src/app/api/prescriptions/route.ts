@@ -3,6 +3,7 @@ import { BackendError, errorResponse } from "@/lib/server/errors";
 import { listPrescriptionPage } from "@/lib/server/prescriptions";
 import { rateLimit } from "@/lib/server/security";
 import { firstMessage, listQuerySchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
  * One page of the signed-in user's prescriptions, newest first:
  * { success, count, prescriptions[], next_cursor }.
  */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   try {
     const user = await requireUser();
     await rateLimit(`read:${user.uid}`, 120, 60_000);
@@ -37,3 +38,5 @@ export async function GET(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const GET = withRequest(handleGET);

@@ -463,3 +463,42 @@ async function processReminder(
     result.failed += 1;
   }
 }
+
+const cronStatusRef = () => getDb().collection("meta").doc("reminders-cron");
+
+/** Remember that the scheduler ran, so monitoring can tell when it stops. */
+export async function recordCronSuccess(result: CronResult): Promise<void> {
+  await cronStatusRef().set({
+    last_success_at: FieldValue.serverTimestamp(),
+    due: result.due,
+    sent: result.sent,
+    failed: result.failed,
+  });
+}
+
+export interface CronStatus {
+  /** "unknown" until the scheduler has run once, so setups without a scheduler are not flagged. */
+  status: "ok" | "stale" | "unknown";
+  lastSuccessAt: string | null;
+  minutesSinceLastRun: number | null;
+}
+
+/** Minutes without a successful cron run before it is reported stale (0 turns the check off). */
+function staleAfterMinutes(): number {
+  const configured = Number(process.env.CRON_STALE_MINUTES);
+  return Number.isFinite(configured) && process.env.CRON_STALE_MINUTES !== undefined ? configured : 30;
+}
+
+export async function getCronStatus(now = new Date()): Promise<CronStatus> {
+  const last = (await cronStatusRef().get()).get("last_success_at") as Timestamp | undefined;
+  if (!last) return { status: "unknown", lastSuccessAt: null, minutesSinceLastRun: null };
+
+  const minutes = Math.floor((now.getTime() - last.toMillis()) / 60_000);
+  const limit = staleAfterMinutes();
+  return {
+    status: limit > 0 && minutes > limit ? "stale" : "ok",
+    lastSuccessAt: last.toDate().toISOString(),
+    minutesSinceLastRun: minutes,
+  };
+}
+

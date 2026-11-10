@@ -46,8 +46,11 @@ describe("assertAppCheck", () => {
     await expect(assertAppCheck(req())).resolves.toBeUndefined();
     verifyToken.mockRejectedValue(new Error("bad token"));
     await expect(assertAppCheck(req("forged"))).resolves.toBeUndefined();
-    expect(logger.warn).toHaveBeenCalledWith("App Check would have blocked this request (monitor mode)", { reason: "missing" });
-    expect(logger.warn).toHaveBeenCalledWith("App Check would have blocked this request (monitor mode)", { reason: "invalid" });
+    const events = logger.warn.mock.calls.filter(([message]) => message === "security: app_check_rejected");
+    expect(events.map(([, details]) => details)).toEqual([
+      expect.objectContaining({ event: "app_check_rejected", reason: "missing", mode: "monitor" }),
+      expect.objectContaining({ event: "app_check_rejected", reason: "invalid", mode: "monitor" }),
+    ]);
   });
 
   it("in enforce mode rejects missing and invalid tokens with 403", async () => {

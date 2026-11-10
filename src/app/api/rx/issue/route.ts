@@ -4,11 +4,12 @@ import { issuePrescription } from "@/lib/server/rx";
 import { isSigningConfigured } from "@/lib/server/rx-signing";
 import { assertSameOrigin, rateLimit, readJsonBody } from "@/lib/server/security";
 import { rxIssueRequestSchema } from "@/lib/schemas";
+import { withRequest } from "@/lib/server/request-context";
 
 export const dynamic = "force-dynamic";
 
 /** POST /api/rx/issue — prescribers only. Body: { med, dose, duration } → signed QR text. */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requirePrescriber();
@@ -30,3 +31,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withRequest(handlePOST);

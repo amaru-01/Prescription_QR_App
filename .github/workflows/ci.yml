@@ -32,8 +32,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit and route tests
-        run: npm test
+      - name: Unit and route tests (with coverage thresholds)
+        run: npm run test:coverage
 
       # Hosting runtimes may not allow require() of ES modules (Vercel failed with
       # ERR_REQUIRE_ESM from jwks-rsa -> jose 6). Load the server's Firebase
@@ -56,3 +56,26 @@ jobs:
       - name: Audit all dependencies (non-blocking)
         run: npm audit --audit-level=high
         continue-on-error: true
+
+  # Firestore security rules must keep refusing every client request (the app only
+  # talks to Firestore from the server). Needs Java for the Firestore emulator.
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      - name: Firestore rules tests (emulator)
+        run: npm run test:rules
