@@ -8,10 +8,12 @@ export const RX_REASON_TEXT: Record<Extract<RxCheck, { status: "invalid" }>["rea
   malformed: "This code's signature is damaged or incomplete, so it can't be verified.",
   bad_signature: "This code's signature doesn't match its contents. It may have been altered.",
   unknown_key: "This code was signed with a key this server no longer recognises.",
-  expired: "This signed code is more than 30 days old and can no longer be verified.",
+  expired: "This signed code has expired and can no longer be verified. Ask your prescriber for a new one.",
   not_configured: "Verification isn't set up on this server, so the code can't be checked.",
   claimed: "This prescription has already been saved by another account.",
   duplicate: "You've already saved this prescription.",
+  revoked: "Your prescriber withdrew this code, so it can no longer be verified.",
+  locked: "This code was locked after too many wrong PINs. Ask your prescriber for a new one.",
   edited: "The details were changed after the prescriber signed them.",
 };
 

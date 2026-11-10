@@ -22,6 +22,7 @@ import type {
   RxCheck,
 } from "@/types/prescription";
 import { readReminder, stageReminderDelete, stageReminderStatusChange } from "./reminders";
+import { MAX_PIN_ATTEMPTS, pinMatches } from "./rx-pin";
 import { RX_RECORD_RETENTION_SECONDS, type RxPayload } from "./rx-signing";
 
 export { MAX_LIST_LIMIT };
@@ -193,6 +194,11 @@ export async function getPrescriptionStats(uid: string): Promise<DashboardStats>
  * against the reviewed fields) the save also claims the prescription, in one
  * transaction: the first account to save it gets a verified record; the same
  * account saving it again gets a 409; anyone else's copy is stored unverified.
+ *
+ * The transaction also enforces what the signature cannot know: the prescriber
+ * may have revoked the code, it may be locked after too many wrong PINs, and a
+ * PIN-protected code needs the right `pin`. A wrong PIN is counted (even though
+ * nothing is saved) and the save is refused so the patient can try again.
  */
 export async function savePrescription(
   uid: string,
@@ -201,6 +207,8 @@ export async function savePrescription(
     source?: Prescription["source"];
     notes?: string | null;
     rx?: RxPayload;
+    /** The one-time PIN, for codes the prescriber protected with one. */
+    pin?: string;
   }
 ): Promise<{ documentId: string; prescription: Prescription; rx: RxCheck }> {
   const db = getDb();
@@ -217,20 +225,49 @@ export async function savePrescription(
     created_at: FieldValue.serverTimestamp(),
   };
 
-  const rxCheck = await db.runTransaction(async (tx): Promise<RxCheck> => {
+  // A refusal is returned, not thrown, so the failed-PIN counter still commits.
+  type Outcome = { check: RxCheck } | { refuse: BackendError };
+  const outcome = await db.runTransaction(async (tx): Promise<Outcome> => {
     if (!rx) {
       tx.set(docRef, { ...base, verification: null });
-      return { status: "none" };
+      return { check: { status: "none" } };
     }
 
     const claimRef = db.collection("rx_claims").doc(rx.jti);
-    const claim = await tx.get(claimRef);
+    const issuedRef = db.collection("users").doc(rx.iss).collection("issued").doc(rx.jti);
+    const [claim, issued] = await Promise.all([tx.get(claimRef), tx.get(issuedRef)]);
+
+    const saveUnverified = (reason: "claimed" | "revoked" | "locked"): Outcome => {
+      tx.set(docRef, { ...base, verification: null });
+      return { check: { status: "invalid", reason } };
+    };
+
     if (claim.exists) {
       if (claim.get("uid") === uid) {
         throw new BackendError("You've already saved this prescription.", 409);
       }
-      tx.set(docRef, { ...base, verification: null });
-      return { status: "invalid", reason: "claimed" };
+      return saveUnverified("claimed");
+    }
+    // No issued record means the prescriber's account (and codes) were deleted: treat as withdrawn.
+    if (!issued.exists || issued.get("revoked_at")) return saveUnverified("revoked");
+    if (issued.get("locked_at")) return saveUnverified("locked");
+
+    if (rx.pin) {
+      const pin = options?.pin;
+      if (!pin) {
+        return { refuse: new BackendError("Enter the 6-digit PIN your prescriber gave you to save this prescription.", 422) };
+      }
+      if (!pinMatches(rx.jti, pin, issued.get("pin_hash"))) {
+        const attempts = Number(issued.get("pin_attempts") ?? 0) + 1;
+        const locked = attempts >= MAX_PIN_ATTEMPTS;
+        tx.update(issuedRef, { pin_attempts: attempts, ...(locked ? { locked_at: FieldValue.serverTimestamp() } : {}) });
+        const left = MAX_PIN_ATTEMPTS - attempts;
+        return {
+          refuse: locked
+            ? new BackendError("Too many wrong PINs. This code is now locked; ask your prescriber for a new one.", 403)
+            : new BackendError(`That PIN doesn't match. ${left} ${left === 1 ? "attempt" : "attempts"} left.`, 403),
+        };
+      }
     }
 
     const issuedAt = Timestamp.fromMillis(rx.iat * 1000);
@@ -241,17 +278,24 @@ export async function savePrescription(
       purge_at: Timestamp.fromMillis((rx.exp + RX_RECORD_RETENTION_SECONDS) * 1000),
       claimed_at: FieldValue.serverTimestamp(),
     });
-    tx.set(
-      db.collection("users").doc(rx.iss).collection("issued").doc(rx.jti),
-      { claimed_at: FieldValue.serverTimestamp() },
-      { merge: true }
-    );
+    tx.set(issuedRef, { claimed_at: FieldValue.serverTimestamp() }, { merge: true });
     tx.set(docRef, {
       ...base,
       verification: { rx_id: rx.jti, prescriber_uid: rx.iss, prescriber_name: rx.isn, issued_at: issuedAt },
     });
-    return { status: "verified", prescriberName: rx.isn, issuedAt: issuedAt.toDate().toISOString(), matches: true };
+    return {
+      check: {
+        status: "verified",
+        prescriberName: rx.isn,
+        issuedAt: issuedAt.toDate().toISOString(),
+        matches: true,
+        pinRequired: Boolean(rx.pin),
+      },
+    };
   });
+
+  if ("refuse" in outcome) throw outcome.refuse;
+  const rxCheck = outcome.check;
 
   invalidateStatsCache(uid);
   return {

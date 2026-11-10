@@ -13,6 +13,7 @@ notice reviewed for the rules that apply to you (e.g. GDPR, HIPAA, local health-
 | Reminder settings and dose check-ins (last 120 days) | `users/{uid}/reminders` | Reminders and adherence | The prescription or account is deleted |
 | Push subscriptions (a browser's push address and keys) | `users/{uid}/push_subscriptions` | Delivering reminder notifications | The user turns notifications off, the browser reports it expired, or the account is deleted |
 | Prescriber's issued codes: medication, dose, duration, issue/expiry/claimed times | `users/{uid}/issued` | "Issued codes" list for prescribers | Account deletion, or **90 days after the code expires** (TTL) |
+| For PIN-protected codes: a keyed hash of the PIN (never the PIN), the wrong-attempt count, lock and withdrawal times | inside the issued-code record above | Enforcing the PIN, lockout and withdrawal | Same as issued codes |
 | Claim records: which code was claimed, when, and the prescriber id | `rx_claims/{codeId}` | Stops a code being claimed twice | **90 days after the code expires** (TTL). After the patient deletes their account the record stays but is no longer linked to them |
 | Role grants (who was made a prescriber, by whom, when) | `admin_audit` | Accountability | Kept (administrative record) |
 

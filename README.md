@@ -258,10 +258,23 @@ and `duration` plus an `rx` token signed with an Ed25519 key that only the serve
 When a patient scans it:
 
 - the review screen shows **Verified prescription · signed by Dr …**, or explains why not
-  (altered, expired after 30 days, signed with an old key, already saved by someone else);
+  (altered, expired, withdrawn, locked, signed with an old key, already saved by someone else);
 - editing any signed field removes verification, and the record is saved unverified;
 - the first account to save a code claims it (one transaction), so a copied code cannot be
   saved as verified by anyone else, and the prescriber sees "Saved by patient".
+
+Protecting a code that might leak (a photographed or forwarded QR):
+
+- **Claim window:** the prescriber chooses how long a patient has to save a code: 24 hours,
+  **7 days (default)** or 30 days. It is part of the signature, so it can't be extended.
+- **One-time PIN (optional):** tick "Require a one-time PIN" when issuing. A random 6-digit
+  PIN is shown to the prescriber once, to read out to the patient; only a keyed hash is
+  stored. The patient types it when saving. After **5 wrong PINs the code is locked** (the
+  patient can still keep an unverified copy; the prescriber issues a new code). Codes without
+  a PIN work exactly as before.
+- **Withdraw:** a prescriber can withdraw any code a patient hasn't saved yet. Withdrawn codes
+  (and codes whose prescriber account was deleted) can only be saved as unverified records.
+  A code a patient already saved can't be withdrawn.
 
 Setup:
 

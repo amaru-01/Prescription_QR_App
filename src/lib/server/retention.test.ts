@@ -20,7 +20,9 @@ vi.mock("./firebase", () => {
           : { doc: () => ({ collection: (sub: string) => ({ doc: () => (sub === "issued" ? issuedDoc : prescriptionDoc) }) }) },
       runTransaction: async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({
-          get: async () => ({ exists: false }),
+          // No claim exists yet, and the prescriber's issued record does (otherwise the code counts as withdrawn).
+          get: async (ref: { kind?: string }) =>
+            ref.kind === "issued" ? { exists: true, get: () => null } : { exists: false, get: () => undefined },
           create: (_ref: unknown, data: Record<string, unknown>) => void writes.claimCreate.push(data),
           set: () => undefined,
         }),

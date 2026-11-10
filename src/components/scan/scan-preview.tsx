@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Loader2, Save, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2, Save, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { RxStatusBanner } from "@/components/prescription/verification";
 import { SourceBadge } from "@/components/ui/badges";
@@ -31,6 +31,9 @@ export function ScanPreview({
   onSave: () => void;
   onBack: () => void;
 }) {
+  /** Ask for the PIN only while the code is still verifiable and unedited. */
+  const pinRequired = rxCheck !== "checking" && rxCheck.status === "verified" && rxCheck.pinRequired && !edited;
+
   const fields: {
     name: "med" | "dose" | "duration";
     label: string;
@@ -59,6 +62,29 @@ export function ScanPreview({
       </div>
 
       <RxStatusBanner check={rxCheck} edited={edited} />
+
+      {pinRequired ? (
+        <div className="rounded-2xl border border-line bg-elevated/60 px-4 py-3">
+          <label htmlFor="rx-pin" className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+            <KeyRound className="size-4 text-brand-strong" aria-hidden />
+            Prescriber&apos;s PIN
+          </label>
+          <p className="mt-0.5 text-xs text-muted">
+            This code needs the 6-digit PIN your prescriber gave you. Too many wrong tries locks the code.
+          </p>
+          <input
+            id="rx-pin"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={draft.pin ?? ""}
+            onChange={(event) => onChange({ pin: event.target.value.replace(/\D/g, "").slice(0, 6) })}
+            placeholder="123456"
+            className="field mt-2 max-w-[11rem] font-mono tracking-[0.3em]"
+          />
+        </div>
+      ) : null}
 
       {warnings.length > 0 ? (
         <ul className="space-y-1.5 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-xs text-warning">

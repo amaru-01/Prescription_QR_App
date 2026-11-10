@@ -168,6 +168,25 @@ export function ScanFlow() {
       ...(draft.rx ? { rx: draft.rx } : {}),
     };
 
+    // A PIN-protected code that is still verifiable needs its PIN before we ask the server.
+    const needsPin =
+      draft.rx !== undefined &&
+      rxCheck !== "checking" &&
+      rxCheck.status === "verified" &&
+      rxCheck.pinRequired &&
+      signedFields !== null &&
+      validation.value.med === signedFields.med &&
+      validation.value.dose === signedFields.dose &&
+      validation.value.duration === signedFields.duration;
+    if (needsPin) {
+      if (!/^\d{6}$/.test(draft.pin ?? "")) {
+        setFormError("Enter the 6-digit PIN your prescriber gave you.");
+        document.getElementById("rx-pin")?.focus();
+        return;
+      }
+      clean.pin = draft.pin;
+    }
+
     setSaving(true);
     setErrors({});
     setFormError(null);
@@ -199,11 +218,18 @@ export function ScanFlow() {
       }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Something unexpected happened. Please try again.");
+      // A refused save (wrong PIN, code just locked or withdrawn) changes what the banner should say.
+      if (draft.rx && signedFields) {
+        rxApi
+          .verify({ ...signedFields, rx: draft.rx })
+          .then(setRxCheck)
+          .catch(() => undefined);
+      }
       toast({ title: "Could not save", description: error instanceof Error ? error.message : "Unknown error", variant: "error" });
     } finally {
       setSaving(false);
     }
-  }, [draft, online, toast]);
+  }, [draft, online, rxCheck, signedFields, toast]);
 
   const reset = useCallback(() => {
     setStage("capture");

@@ -138,7 +138,7 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 
 **Tasks** (confirm product decisions first)
 1. Revocation: add `revoked_at` to `issued`; `POST /api/rx/[id]/revoke` (prescriber, own codes only); checked in `checkRx` and in the save transaction (read the issued doc inside the transaction).
-2. Claim window: make configurable per issue (24 h / 7 d / 30 d), default 7 d; stored in the signed `exp`.
+2. Claim window: make configurable per issue (24 h / 7 d / 30 d), default 7 d; stored in the signed `exp`. **Done** (decision: 7 days).
 3. Optional one-time PIN: on issue, generate a 6-digit PIN, store only an HMAC of it (`pin_hash`), show it once to the prescriber; the patient types it at save; limit 5 attempts per code (counter on `issued`), then lock the code. Feature-flag per prescriber so existing flows keep working.
 4. Prescriber UI: show claimed/unclaimed/revoked/expired, with revoke button.
 5. Tests: revoked code → `invalid/revoked` at verify and save; wrong PIN ×5 locks; claim race still single-winner (extend existing transaction test).

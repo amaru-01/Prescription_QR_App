@@ -40,7 +40,7 @@ describe("signRx / verifyRx", () => {
     expect(token.startsWith("vd1.")).toBe(true);
     const result = verifyRx(token);
     expect(result).toEqual({ valid: true, payload });
-    expect(payload.exp - payload.iat).toBe(30 * 24 * 60 * 60);
+    expect(payload.exp - payload.iat).toBe(7 * 24 * 60 * 60);
   });
 
   it("accepts a PEM key with escaped newlines", () => {
@@ -76,8 +76,19 @@ describe("signRx / verifyRx", () => {
   it("rejects expired tokens", () => {
     const issued = new Date("2026-01-01T00:00:00Z");
     const { token } = signRx(fields, issued);
-    expect(verifyRx(token, new Date("2026-02-15T00:00:00Z"))).toEqual({ valid: false, reason: "expired" });
-    expect(verifyRx(token, new Date("2026-01-20T00:00:00Z")).valid).toBe(true);
+    // Default window is 7 days.
+    expect(verifyRx(token, new Date("2026-01-09T00:00:00Z"))).toEqual({ valid: false, reason: "expired" });
+    expect(verifyRx(token, new Date("2026-01-06T00:00:00Z")).valid).toBe(true);
+  });
+
+  it("honours a custom claim window and the PIN flag, and rejects a bad pin flag", () => {
+    const issued = new Date("2026-01-01T00:00:00Z");
+    const day = 24 * 60 * 60;
+    const { token, payload } = signRx({ ...fields, pin: true }, issued, 1 * day);
+    expect(payload.pin).toBe(true);
+    expect(payload.exp - payload.iat).toBe(day);
+    expect(verifyRx(token, new Date("2026-01-01T12:00:00Z")).valid).toBe(true);
+    expect(verifyRx(token, new Date("2026-01-02T00:00:01Z"))).toEqual({ valid: false, reason: "expired" });
   });
 
   it.each(["", "vd1.abc", "vd2.a.b", "vd1.!!!.sig", `vd1.${Buffer.from("[]").toString("base64url")}.sig`])(
