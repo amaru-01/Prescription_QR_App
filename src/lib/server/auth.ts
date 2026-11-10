@@ -172,6 +172,29 @@ export async function createSessionCookie(idToken: string): Promise<string> {
   return auth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_SECONDS * 1000 });
 }
 
+/**
+ * Prove the person at the keyboard just signed in, for destructive actions: a
+ * stolen session cookie alone must not be enough. `idToken` is a fresh Firebase
+ * ID token belonging to `uid`, from a sign-in in the last few minutes.
+ */
+export async function assertRecentSignIn(uid: string, idToken: unknown): Promise<void> {
+  if (typeof idToken !== "string" || !idToken) {
+    throw new BackendError("Please confirm your password to continue.", 401);
+  }
+  let decoded;
+  try {
+    decoded = await getAdminAuth().verifyIdToken(idToken, true);
+  } catch {
+    throw new BackendError("Your sign-in could not be verified. Please try again.", 401);
+  }
+  if (decoded.uid !== uid) {
+    throw new BackendError("Your sign-in could not be verified. Please try again.", 401);
+  }
+  if (Date.now() / 1000 - decoded.auth_time > MAX_SIGN_IN_AGE_SECONDS) {
+    throw new BackendError("Please confirm your password again to continue.", 401);
+  }
+}
+
 export function sessionCookieOptions(maxAge: number) {
   return {
     httpOnly: true,

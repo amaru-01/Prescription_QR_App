@@ -16,6 +16,12 @@ import crypto from "node:crypto";
 export const RX_TOKEN_PREFIX = "vd1";
 /** How long a patient has to save (claim) a newly issued prescription. */
 export const RX_CLAIM_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+/**
+ * Issued-code and claim records are kept this long after the code expires, then
+ * removed by a Firestore TTL policy on their `purge_at` field. Claims must
+ * outlive the code itself, otherwise an expired-but-copied QR could be claimed twice.
+ */
+export const RX_RECORD_RETENTION_SECONDS = 90 * 24 * 60 * 60;
 
 export interface RxPayload {
   v: 1;

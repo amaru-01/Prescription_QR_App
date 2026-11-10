@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { ExportActions } from "@/components/export-actions";
+import { DeleteAccount } from "@/components/settings/delete-account";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useSession } from "@/hooks/use-session";
 import { useToast } from "@/hooks/use-toasts";
@@ -351,6 +352,8 @@ export function SettingsView() {
             <ExportActions />
           </div>
         </section>
+
+        <DeleteAccount />
       </div>
 
       <section id="install" className="card scroll-mt-24 p-5" aria-labelledby="install-title">

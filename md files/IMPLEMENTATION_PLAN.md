@@ -117,8 +117,8 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 **Tasks**
 1. Export & stats (#9)
    - `exportPrescriptions`: page through all records (200 per page) and stream the CSV via `ReadableStream`; keep the 5/min limit; add a row cap of e.g. 20,000 with a clear header note if hit.
-   - Unique meds: store `med_key` (normalised lowercase) on write; compute unique count with a distinct set over a `select("med_key")` scan paged, or maintain `users/{uid}/meta/stats` counters updated in the save/update/delete transactions. Choose counters if dashboards load often. Backfill with `scripts/migrate-prescriptions.mjs`.
-   - Cache stats per user for 30 s.
+   - Unique meds: **done by paged scan** of the `med` field (up to 10,000 records) rather than a stored `med_key` or counters, with the per-user 30 s cache below. No schema change or migration; the trade-off is up to 10 read-pages on a cache miss for very large histories. Move to counters if that becomes costly.
+   - Cache stats per user for 30 s (invalidated on save/update/delete on the same instance).
 2. Account deletion & export (#7)
    - `DELETE /api/auth/account`: requires a recent sign-in (≤ 5 min), then `db.recursiveDelete(users/{uid})`, deletes `rx_claims` where `uid == user` (keep a minimal tombstone `{jti, claimed: true}` so a deleted claim can't be re-claimed), then `auth.deleteUser`, then clears the cookie.
    - Settings UI: "Delete my account" with typed confirmation; link to the CSV export.

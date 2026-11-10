@@ -4,7 +4,7 @@ import type { PrescriptionInput, RxCheck } from "@/types/prescription";
 import type { SessionUser } from "@/types/auth";
 import { BackendError } from "./errors";
 import { getDb } from "./firebase";
-import { newRxId, rxMatches, signRx, verifyRx } from "./rx-signing";
+import { newRxId, RX_RECORD_RETENTION_SECONDS, rxMatches, signRx, verifyRx } from "./rx-signing";
 
 export interface IssuedRx {
   rxId: string;
@@ -54,6 +54,7 @@ export async function issuePrescription(
     issued_at: issuedAt,
     expires_at: expiresAt,
     claimed_at: null,
+    purge_at: Timestamp.fromMillis((payload.exp + RX_RECORD_RETENTION_SECONDS) * 1000),
   });
 
   return {

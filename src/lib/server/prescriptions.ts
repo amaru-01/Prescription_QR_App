@@ -1,4 +1,12 @@
-import { FieldValue, Timestamp, type DocumentData, type Query } from "firebase-admin/firestore";
+import {
+  FieldPath,
+  FieldValue,
+  Timestamp,
+  type CollectionReference,
+  type DocumentData,
+  type Query,
+  type QueryDocumentSnapshot,
+} from "firebase-admin/firestore";
 
 import { MAX_LIST_LIMIT } from "@/lib/schemas";
 import type { DashboardStats } from "@/lib/stats";
@@ -14,7 +22,7 @@ import type {
   RxCheck,
 } from "@/types/prescription";
 import { readReminder, stageReminderDelete, stageReminderStatusChange } from "./reminders";
-import type { RxPayload } from "./rx-signing";
+import { RX_RECORD_RETENTION_SECONDS, type RxPayload } from "./rx-signing";
 
 export { MAX_LIST_LIMIT };
 
@@ -119,30 +127,63 @@ export async function listPrescriptions(uid: string, limit = 100): Promise<Presc
   return (await listPrescriptionPage(uid, { limit })).prescriptions;
 }
 
+/** Per-user dashboard totals are cached briefly: the home page asks for them on every visit. */
+const STATS_TTL_MS = 30_000;
+const statsCache = new Map<string, { at: number; stats: DashboardStats }>();
+
+/** Drop a user's cached totals after their records change on this instance. */
+export function invalidateStatsCache(uid: string): void {
+  statsCache.delete(uid);
+}
+
+/** Cap on how many records are scanned to count distinct medications. */
+const UNIQUE_MEDS_SCAN_LIMIT = 10_000;
+const SCAN_PAGE_SIZE = 1_000;
+
+/** Distinct medication names across all of a user's records, reading only the `med` field. */
+async function countUniqueMeds(collection: CollectionReference): Promise<number> {
+  const names = new Set<string>();
+  let last: QueryDocumentSnapshot | undefined;
+  for (let scanned = 0; scanned < UNIQUE_MEDS_SCAN_LIMIT; ) {
+    let query = collection.select("med").orderBy(FieldPath.documentId()).limit(SCAN_PAGE_SIZE);
+    if (last) query = query.startAfter(last);
+    const page = await query.get();
+    for (const doc of page.docs) {
+      const name = String(doc.get("med") ?? "").trim().toLowerCase();
+      if (name) names.add(name);
+    }
+    scanned += page.size;
+    if (page.size < SCAN_PAGE_SIZE) break;
+    last = page.docs[page.docs.length - 1];
+  }
+  return names.size;
+}
+
 /**
- * Dashboard totals for all of the user's records, using Firestore count
- * aggregations (billed at one read per 1,000 records) instead of loading them.
+ * Dashboard totals for all of the user's records. Counts use Firestore
+ * aggregations (one read per 1,000 records); distinct medications need a scan
+ * of the `med` field because Firestore cannot count distinct values.
  */
 export async function getPrescriptionStats(uid: string): Promise<DashboardStats> {
+  const cached = statsCache.get(uid);
+  if (cached && Date.now() - cached.at < STATS_TTL_MS) return cached.stats;
+
   const collection = userPrescriptions(uid);
   const weekAgo = Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const count = async (query: Query) => (await query.count().get()).data().count;
 
-  const [total, active, completed, archived, thisWeek, meds] = await Promise.all([
+  const [total, active, completed, archived, thisWeek, uniqueMeds] = await Promise.all([
     count(collection),
     count(collection.where("status", "==", "active")),
     count(collection.where("status", "==", "completed")),
     count(collection.where("status", "==", "archived")),
     count(collection.where("created_at", ">=", weekAgo)),
-    // Firestore cannot count distinct values; read only the `med` field.
-    collection.select("med").limit(MAX_LIST_LIMIT).get(),
+    countUniqueMeds(collection),
   ]);
 
-  const uniqueMeds = new Set(
-    meds.docs.map((doc) => String(doc.get("med") ?? "").trim().toLowerCase()).filter(Boolean)
-  ).size;
-
-  return { total, active, completed, archived, thisWeek, uniqueMeds };
+  const stats = { total, active, completed, archived, thisWeek, uniqueMeds };
+  statsCache.set(uid, { at: Date.now(), stats });
+  return stats;
 }
 
 /**
@@ -197,6 +238,7 @@ export async function savePrescription(
       uid,
       prescription_id: docRef.id,
       prescriber_uid: rx.iss,
+      purge_at: Timestamp.fromMillis((rx.exp + RX_RECORD_RETENTION_SECONDS) * 1000),
       claimed_at: FieldValue.serverTimestamp(),
     });
     tx.set(
@@ -211,6 +253,7 @@ export async function savePrescription(
     return { status: "verified", prescriberName: rx.isn, issuedAt: issuedAt.toDate().toISOString(), matches: true };
   });
 
+  invalidateStatsCache(uid);
   return {
     documentId: docRef.id,
     rx: rxCheck,
@@ -256,6 +299,7 @@ export async function updatePrescription(uid: string, id: string, updates: Presc
       tx.update(ref, { ...updates, updated_at: FieldValue.serverTimestamp() });
       if (reminder && updates.status) stageReminderStatusChange(tx, uid, id, reminder, updates.status);
     });
+    invalidateStatsCache(uid);
   } catch (error) {
     if ((error as { code?: unknown })?.code === NOT_FOUND_CODE) {
       throw new BackendError("Prescription not found.", 404);
@@ -274,6 +318,7 @@ export async function deletePrescription(uid: string, id: string): Promise<void>
     tx.delete(ref);
     stageReminderDelete(tx, uid, id);
   });
+  invalidateStatsCache(uid);
 }
 
 /**
@@ -285,26 +330,71 @@ export function csvField(value: string): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
+const CSV_HEADERS = ["ID", "Medication", "Dosage", "Duration", "Status", "Source", "Notes", "Created At"];
+
+const csvRow = (p: Prescription): string =>
+  [p.id, p.med, p.dose, p.duration, p.status, p.source, p.notes || "", p.createdAt || ""].map(csvField).join(",");
+
 /** Render prescriptions as a CSV document (CRLF line endings, header row first). */
 export function toCsv(prescriptions: Prescription[]): string {
-  const headers = ["ID", "Medication", "Dosage", "Duration", "Status", "Source", "Notes", "Created At"];
-  const rows = prescriptions.map((p) => [
-    p.id,
-    p.med,
-    p.dose,
-    p.duration,
-    p.status,
-    p.source,
-    p.notes || "",
-    p.createdAt || "",
-  ]);
+  return [CSV_HEADERS.map(csvField).join(","), ...prescriptions.map(csvRow)].join("\r\n");
+}
 
-  return [headers, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n");
+/** Most records one export will contain; a note row says so when it is reached. */
+export const EXPORT_ROW_LIMIT = 20_000;
+const EXPORT_PAGE_SIZE = 200;
+
+/** Walk every prescription of a user, newest first, one page at a time. */
+async function* eachPrescription(uid: string, limit: number): AsyncGenerator<Prescription> {
+  const collection = userPrescriptions(uid);
+  let last: QueryDocumentSnapshot | undefined;
+  let yielded = 0;
+  while (yielded < limit) {
+    let query = collection.orderBy("created_at", "desc").limit(Math.min(EXPORT_PAGE_SIZE, limit - yielded));
+    if (last) query = query.startAfter(last);
+    const page = await query.get();
+    for (const doc of page.docs) {
+      yield toPrescription(doc.id, doc.data());
+      yielded += 1;
+    }
+    if (page.size < EXPORT_PAGE_SIZE) return;
+    last = page.docs[page.docs.length - 1];
+  }
 }
 
 /**
- * Export the user's prescriptions as CSV.
+ * Export all of the user's prescriptions as a CSV stream, so large histories
+ * are never held in memory at once. Capped at EXPORT_ROW_LIMIT records; when
+ * the cap is hit a final note row says the export is incomplete.
  */
-export async function exportPrescriptions(uid: string): Promise<string> {
-  return toCsv(await listPrescriptions(uid, MAX_LIST_LIMIT));
+export function exportPrescriptionsStream(uid: string, limit = EXPORT_ROW_LIMIT): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const records = eachPrescription(uid, limit + 1); // one extra tells us whether we hit the cap
+  let rows = 0;
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(CSV_HEADERS.map(csvField).join(",")));
+    },
+    async pull(controller) {
+      try {
+        const next = await records.next();
+        if (next.done) return controller.close();
+        if (rows >= limit) {
+          controller.enqueue(
+            encoder.encode(`\r\n${csvField(`Export limited to the newest ${limit} records.`)}`)
+          );
+          await records.return(undefined);
+          return controller.close();
+        }
+        rows += 1;
+        controller.enqueue(encoder.encode(`\r\n${csvRow(next.value)}`));
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await records.return(undefined);
+    },
+  });
 }

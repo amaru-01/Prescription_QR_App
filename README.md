@@ -396,6 +396,17 @@ my_prescription_app/
 - Push subscriptions are accepted only from known push services (FCM, Mozilla, Apple, Windows); self-hosted push services can be added with `PUSH_ALLOWED_HOSTS`, and each account may register at most 10 devices
 - Keep the deny-all `firestore.rules` deployed; the app only accesses Firestore from the server
 
+### Your data: export, deletion and retention
+
+- **Export:** Settings → Data & exports streams every record as CSV (up to 20,000; a final row
+  says so if the history is longer).
+- **Delete account:** Settings → Delete account (password + typed confirmation) erases the
+  account and everything under it. Claim records are detached from the person and expire with
+  the retention policy.
+- **Automatic expiry:** issued-code and claim records are purged 90 days after the code
+  expires. One-time setup: enable the Firestore TTL policies and backfill older records. The
+  exact commands, and what is stored and why, are in [docs/PRIVACY.md](docs/PRIVACY.md).
+
 ### Abuse protection
 
 - **Rate limits** are shared across all server instances when `UPSTASH_REDIS_REST_URL` and

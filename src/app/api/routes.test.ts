@@ -10,7 +10,7 @@ const { requireUser, data } = vi.hoisted(() => ({
     updatePrescription: vi.fn(),
     deletePrescription: vi.fn(),
     listPrescriptionPage: vi.fn(),
-    exportPrescriptions: vi.fn(),
+    exportPrescriptionsStream: vi.fn(),
   },
 }));
 
@@ -161,7 +161,7 @@ describe("GET /api/prescriptions/export", () => {
   });
 
   it("downloads CSV without caching", async () => {
-    data.exportPrescriptions.mockResolvedValue('"ID"');
+    data.exportPrescriptionsStream.mockReturnValue(new Response('"ID"').body);
     const res = await exporter.GET();
     expect(res.headers.get("content-type")).toContain("text/csv");
     expect(res.headers.get("cache-control")).toBe("no-store");

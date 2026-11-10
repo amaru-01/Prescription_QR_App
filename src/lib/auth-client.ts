@@ -97,3 +97,39 @@ export async function signOutSession({ everywhere = false } = {}): Promise<void>
     credentials: "same-origin",
   });
 }
+
+/**
+ * Permanently delete the signed-in account and all of its data.
+ *
+ * Registered users must re-enter their password: it is exchanged for a fresh
+ * ID token the server requires for this action. Guests have no password.
+ * Uses fetch directly (not the shared API helper) because a 401 here means
+ * "wrong password", not "session expired".
+ */
+export async function deleteAccount({ email, password }: { email?: string | null; password?: string }): Promise<void> {
+  const auth = getClientAuth();
+  let idToken: string | undefined;
+
+  if (email) {
+    if (!password) throw new Error("Enter your password to confirm.");
+    const { user } = await signInWithEmailAndPassword(auth, email, password);
+    idToken = await user.getIdToken();
+  }
+
+  try {
+    const res = await fetch("/api/auth/account", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(idToken ? { idToken } : {}),
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as { detail?: string } | null;
+      const error = new Error(payload?.detail ?? "We couldn't delete your account. Please try again.");
+      error.name = "SessionError";
+      throw error;
+    }
+  } finally {
+    await signOut(auth).catch(() => undefined);
+  }
+}

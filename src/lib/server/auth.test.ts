@@ -259,3 +259,34 @@ describe("requireRegisteredUser", () => {
     await expect(requireRegisteredUser()).rejects.toMatchObject({ statusCode: 401 });
   });
 });
+
+describe("assertRecentSignIn", () => {
+  const { assertRecentSignIn } = authModule;
+  const decoded = (overrides = {}) => ({ uid: "u1", auth_time: nowSeconds() - 30, ...overrides });
+
+  it("accepts a fresh token for the same user", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded());
+    await expect(assertRecentSignIn("u1", "token")).resolves.toBeUndefined();
+    expect(adminAuth.verifyIdToken).toHaveBeenCalledWith("token", true);
+  });
+
+  it("requires a token", async () => {
+    await expect(assertRecentSignIn("u1", undefined)).rejects.toMatchObject({ statusCode: 401 });
+    await expect(assertRecentSignIn("u1", "")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects a token that does not verify", async () => {
+    adminAuth.verifyIdToken.mockRejectedValue(authError("auth/id-token-revoked"));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects another user's token", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded({ uid: "attacker" }));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects a sign-in older than five minutes", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded({ auth_time: nowSeconds() - 6 * 60 }));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
+  });
+});
