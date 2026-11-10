@@ -32,7 +32,7 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
    - Add gitleaks (or GitHub secret scanning) and CodeQL workflows.
 4. Hygiene (#13)
    - Inspect `prescription_qr.png`. If it holds a real signed token, rotate `RX_SIGNING_PRIVATE_KEY`. Either way, remove it from the repo root (`git rm`) or move it to `docs/` with a note that it is sample data.
-   - Move `service-account.json` out of the project folder and point `FIREBASE_SERVICE_ACCOUNT_PATH` at it; rotate the key if the folder was ever shared.
+   - ~~Move `service-account.json` out of the project folder~~ — not needed: credentials come from `FIREBASE_CREDENTIALS` in `.env`; the file is unused (safe to delete).
 5. Test scaffolding for later phases
    - Add `vitest` coverage config (report only, no threshold yet).
    - Add the Firebase emulator setup (`firebase.json` emulators for auth + firestore) and an `npm run test:rules` script placeholder; the real rules tests land in Phase 6.
