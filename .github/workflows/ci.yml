@@ -50,3 +50,9 @@ jobs:
       # moderate ones are transitive deps of firebase-admin awaiting an upstream fix.
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+      # Informational: includes dev tooling (vitest, postcss...), which the gate
+      # above skips. Review the output; it does not fail the build.
+      - name: Audit all dependencies (non-blocking)
+        run: npm audit --audit-level=high
+        continue-on-error: true

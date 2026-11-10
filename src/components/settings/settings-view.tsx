@@ -180,7 +180,16 @@ export function SettingsView() {
           </div>
 
           <div className="mt-4 space-y-3">
-            {user && !user.isAnonymous ? (
+            {user?.role === "prescriber" ? (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold text-ink">Prescriber name</p>
+                <p className="field cursor-not-allowed text-muted">{user.credentialName ?? "Not set yet"}</p>
+                <p className="mt-1.5 text-xs text-muted">
+                  This is the name patients see on your signed prescriptions. An administrator manages it.
+                  {user.credentialName ? "" : " Ask them to set it before you issue codes."}
+                </p>
+              </div>
+            ) : user && !user.isAnonymous ? (
               <div>
                 <label htmlFor="profile-name" className="mb-1.5 block text-xs font-semibold text-ink">Display name</label>
                 <input
@@ -195,7 +204,7 @@ export function SettingsView() {
               </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
-              {user && !user.isAnonymous ? (
+              {user && !user.isAnonymous && user.role !== "prescriber" ? (
                 <button
                   type="button"
                   onClick={() => void saveName()}
@@ -205,11 +214,11 @@ export function SettingsView() {
                   {savingName ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
                   Save name
                 </button>
-              ) : (
+              ) : user?.isAnonymous || !user ? (
                 <Link href="/signup" className="btn btn-primary min-h-11 px-3.5 text-sm">
                   Create an account
                 </Link>
-              )}
+              ) : null}
               {user ? (
                 <button
                   type="button"

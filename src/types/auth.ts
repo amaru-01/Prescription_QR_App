@@ -11,4 +11,10 @@ export interface SessionUser {
   isAnonymous: boolean;
   /** From the Firebase custom claim `role` (set with scripts/set-role.mjs). */
   role: UserRole;
+  /**
+   * Name an administrator vouched for (custom claim `credentialName`, set with
+   * scripts/set-role.mjs). Prescribers cannot edit it, and it is the only name
+   * ever signed into a prescription.
+   */
+  credentialName: string | null;
 }

@@ -17,6 +17,13 @@ export const SESSION_MAX_AGE_SECONDS = 5 * 24 * 60 * 60;
 /** A sign-in must be this recent to be exchanged for a session cookie. */
 const MAX_SIGN_IN_AGE_SECONDS = 5 * 60;
 
+/** A vouched-for name from the custom claim, or null when absent or malformed. */
+function credentialNameFrom(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name.length >= 2 && name.length <= 80 ? name : null;
+}
+
 function isAuthError(error: unknown): boolean {
   const code = (error as { code?: unknown })?.code;
   return typeof code === "string" && code.startsWith("auth/");
@@ -52,6 +59,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
       isAnonymous: decoded.firebase?.sign_in_provider === "anonymous",
       // Read from the fresh user record, so role changes apply on the next request.
       role: user.customClaims?.role === "prescriber" ? "prescriber" : "patient",
+      credentialName: credentialNameFrom(user.customClaims?.credentialName),
     };
   } catch (error) {
     if (isAuthError(error)) return null;
@@ -66,11 +74,17 @@ export async function requireUser(): Promise<SessionUser> {
   return user;
 }
 
-/** For prescriber-only API routes: 401 when signed out, 403 for patients and guests. */
+/**
+ * For prescriber-only API routes: 401 when signed out, 403 for patients, guests
+ * and prescribers whose email address has not been verified.
+ */
 export async function requirePrescriber(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.role !== "prescriber" || user.isAnonymous) {
     throw new BackendError("Only prescriber accounts can do this.", 403);
+  }
+  if (!user.emailVerified) {
+    throw new BackendError("Verify your email address before issuing prescriptions.", 403);
   }
   return user;
 }

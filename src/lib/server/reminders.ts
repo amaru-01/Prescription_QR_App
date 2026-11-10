@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
 
+import { isAllowedPushEndpoint, MAX_PUSH_SUBSCRIPTIONS } from "@/lib/push-hosts";
 import { isValidTime, isValidTimeZone, localDayKey, nextOccurrence } from "@/lib/schedule";
 import type { PrescriptionStatus } from "@/types/prescription";
 import { BackendError } from "./errors";
@@ -203,11 +204,27 @@ export async function onPrescriptionDeleted(uid: string, prescriptionId: string)
   await reminderRef(uid, prescriptionId).delete();
 }
 
+/**
+ * Register (or refresh) a browser's push subscription. An account keeps at
+ * most MAX_PUSH_SUBSCRIPTIONS; registering another evicts the oldest ones, so
+ * one account cannot multiply the cron's outgoing requests.
+ */
 export async function savePushSubscription(uid: string, subscription: PushSubscriptionInput): Promise<void> {
-  await subscriptionsOf(uid).doc(subscriptionId(subscription.endpoint)).set({
-    endpoint: subscription.endpoint,
-    keys: subscription.keys,
-    created_at: FieldValue.serverTimestamp(),
+  const collection = subscriptionsOf(uid);
+  const id = subscriptionId(subscription.endpoint);
+  const db = getDb();
+
+  await db.runTransaction(async (tx) => {
+    const existing = await tx.get(collection.orderBy("created_at", "asc"));
+    const others = existing.docs.filter((doc) => doc.id !== id);
+    const overflow = others.length - (MAX_PUSH_SUBSCRIPTIONS - 1);
+    for (const doc of others.slice(0, Math.max(0, overflow))) tx.delete(doc.ref);
+
+    tx.set(collection.doc(id), {
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+      created_at: FieldValue.serverTimestamp(),
+    });
   });
 }
 
@@ -279,6 +296,11 @@ export async function runDueReminders(send: PushSender, now = new Date()): Promi
 
     const subscriptions = await subscriptionsOf(uid).get();
     for (const sub of subscriptions.docs) {
+      // Rows saved before the host allowlist existed: never send to them, and clean them up.
+      if (!isAllowedPushEndpoint(String(sub.get("endpoint") ?? ""))) {
+        await sub.ref.delete();
+        continue;
+      }
       const outcome = await send({ endpoint: sub.get("endpoint"), keys: sub.get("keys") }, payload);
       if (outcome === "sent") result.sent += 1;
       else if (outcome === "gone") await sub.ref.delete();
