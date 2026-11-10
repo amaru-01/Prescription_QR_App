@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -39,7 +39,7 @@ jobs:
       # ERR_REQUIRE_ESM from jwks-rsa -> jose 6). Load the server's Firebase
       # modules with that feature disabled so such a dependency fails here first.
       - name: Server modules load without require(esm)
-        run: node --no-experimental-require-module -e "require('firebase-admin/app'); require('firebase-admin/auth'); require('firebase-admin/firestore'); require('web-push')"
+        run: node --no-experimental-require-module -e "require('firebase-admin/app'); require('firebase-admin/auth'); require('firebase-admin/firestore'); require('firebase-admin/app-check'); require('web-push')"
 
       - name: Build
         run: npm run build

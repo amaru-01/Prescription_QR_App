@@ -258,10 +258,23 @@ and `duration` plus an `rx` token signed with an Ed25519 key that only the serve
 When a patient scans it:
 
 - the review screen shows **Verified prescription · signed by Dr …**, or explains why not
-  (altered, expired after 30 days, signed with an old key, already saved by someone else);
+  (altered, expired, withdrawn, locked, signed with an old key, already saved by someone else);
 - editing any signed field removes verification, and the record is saved unverified;
 - the first account to save a code claims it (one transaction), so a copied code cannot be
   saved as verified by anyone else, and the prescriber sees "Saved by patient".
+
+Protecting a code that might leak (a photographed or forwarded QR):
+
+- **Claim window:** the prescriber chooses how long a patient has to save a code: 24 hours,
+  **7 days (default)** or 30 days. It is part of the signature, so it can't be extended.
+- **One-time PIN (optional):** tick "Require a one-time PIN" when issuing. A random 6-digit
+  PIN is shown to the prescriber once, to read out to the patient; only a keyed hash is
+  stored. The patient types it when saving. After **5 wrong PINs the code is locked** (the
+  patient can still keep an unverified copy; the prescriber issues a new code). Codes without
+  a PIN work exactly as before.
+- **Withdraw:** a prescriber can withdraw any code a patient hasn't saved yet. Withdrawn codes
+  (and codes whose prescriber account was deleted) can only be saved as unverified records.
+  A code a patient already saved can't be withdrawn.
 
 Setup:
 
@@ -395,6 +408,38 @@ my_prescription_app/
 - Only grant the prescriber role to vetted accounts, with a verified email and a `--name` you checked
 - Push subscriptions are accepted only from known push services (FCM, Mozilla, Apple, Windows); self-hosted push services can be added with `PUSH_ALLOWED_HOSTS`, and each account may register at most 10 devices
 - Keep the deny-all `firestore.rules` deployed; the app only accesses Firestore from the server
+
+### Your data: export, deletion and retention
+
+- **Export:** Settings → Data & exports streams every record as CSV (up to 20,000; a final row
+  says so if the history is longer).
+- **Delete account:** Settings → Delete account (password + typed confirmation) erases the
+  account and everything under it. Claim records are detached from the person and expire with
+  the retention policy.
+- **Automatic expiry:** issued-code and claim records are purged 90 days after the code
+  expires. One-time setup: enable the Firestore TTL policies and backfill older records. The
+  exact commands, and what is stored and why, are in [docs/PRIVACY.md](docs/PRIVACY.md).
+
+### Abuse protection
+
+- **Rate limits** are shared across all server instances when `UPSTASH_REDIS_REST_URL` and
+  `UPSTASH_REDIS_REST_TOKEN` are set (a free Upstash Redis database is enough). Without them
+  limits are per instance. If Redis is unreachable the app falls back to per-instance limits
+  rather than going down, and logs a warning.
+- **Client IPs** come only from the `x-vercel-forwarded-for` header Vercel sets. Behind your own
+  reverse proxy that overwrites `X-Forwarded-For`, set `TRUST_PROXY=1`; otherwise every
+  anonymous caller shares one bucket.
+- **Guest accounts** can scan and save records, but reminders, dose logging and push
+  notifications require a registered account.
+- **App Check (recommended):** create a reCAPTCHA Enterprise key, register the web app under
+  Firebase Console → App Check, and set `NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY`. That starts
+  *monitor mode*: tokens are verified and failures logged (`App Check would have blocked this
+  request`) but nothing is blocked. Once the logs show real users passing, set
+  `APP_CHECK_ENFORCE=1` to reject sign-ins without a valid token.
+- **User lookups are cached for 30 s** per server instance to save a Google API call on every
+  request. Role changes made with `npm run set-role` and "sign out everywhere" on another
+  instance therefore take up to 30 s to apply (the instance handling the request applies them
+  immediately). Set `AUTH_CACHE_TTL_MS=0` to disable.
 
 ## 🛠 Troubleshooting
 

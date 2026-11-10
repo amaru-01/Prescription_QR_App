@@ -21,10 +21,10 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
-    rateLimit(`save:${user.uid}`, 30, 60_000);
+    await rateLimit(`save:${user.uid}`, 30, 60_000);
 
     const body = await readJsonBody(request);
-    const { source, notes, rx, ...input } = parseOrThrow(
+    const { source, notes, rx, pin, ...input } = parseOrThrow(
       saveRequestSchema,
       body,
       "Please check the prescription fields."
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       else signed = verification.payload;
     }
 
-    const result = await savePrescription(user.uid, input, { source, notes: notes ?? null, rx: signed });
+    const result = await savePrescription(user.uid, input, { source, notes: notes ?? null, rx: signed, pin });
 
     return Response.json({
       success: true,

@@ -28,7 +28,7 @@ export interface PrescriptionVerification {
 /** Outcome of checking a scanned QR's signature, shown on the review screen. */
 export type RxCheck =
   | { status: "none" }
-  | { status: "verified"; prescriberName: string; issuedAt: string; matches: boolean }
+  | { status: "verified"; prescriberName: string; issuedAt: string; matches: boolean; pinRequired: boolean }
   | {
       status: "invalid";
       reason:
@@ -39,6 +39,10 @@ export type RxCheck =
         | "not_configured"
         | "claimed"
         | "duplicate"
+        /** The prescriber withdrew the code (or their account no longer exists). */
+        | "revoked"
+        /** Too many wrong PINs were entered, so the code was locked. */
+        | "locked"
         /** The reviewed fields differ from what the prescriber signed. */
         | "edited";
     };
@@ -55,6 +59,8 @@ export interface PrescriptionDraft extends PrescriptionInput {
   notes?: string | null;
   /** Signed token from a prescriber-issued QR code, if the code had one. */
   rx?: string;
+  /** The one-time PIN the prescriber gave the patient, for codes that require one. */
+  pin?: string;
 }
 
 export type PrescriptionUpdate = Partial<Pick<Prescription, "status" | "notes">>;

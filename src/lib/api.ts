@@ -125,6 +125,17 @@ export interface IssuedRx {
   expiresAt: string;
   claimed: boolean;
   expired: boolean;
+  revoked: boolean;
+  pinProtected: boolean;
+  locked: boolean;
+}
+
+/** How a prescriber wants a new code issued. */
+export interface IssueOptions {
+  /** Days the patient has to save it: 1, 7 (default) or 30. */
+  validityDays?: 1 | 7 | 30;
+  /** Require a one-time PIN, shown once to the prescriber. */
+  requirePin?: boolean;
 }
 
 /** Signed prescription QR codes. */
@@ -136,10 +147,22 @@ export const rxApi = {
   },
 
   /** Prescribers: sign a new prescription and get the QR text. */
-  async issue(input: PrescriptionInput): Promise<{ qrText: string; issued: IssuedRx }> {
-    const res = await request("/api/rx/issue", { method: "POST", ...json(input) }, "Could not issue the prescription.");
-    const data = (await res.json()) as { qr_text: string; issued: IssuedRx };
-    return { qrText: data.qr_text, issued: data.issued };
+  async issue(
+    input: PrescriptionInput,
+    options: IssueOptions = {}
+  ): Promise<{ qrText: string; issued: IssuedRx; pin: string | null }> {
+    const res = await request(
+      "/api/rx/issue",
+      { method: "POST", ...json({ ...input, ...options }) },
+      "Could not issue the prescription."
+    );
+    const data = (await res.json()) as { qr_text: string; issued: IssuedRx; pin: string | null };
+    return { qrText: data.qr_text, issued: data.issued, pin: data.pin };
+  },
+
+  /** Prescribers: withdraw a code that no patient has saved yet. */
+  async revoke(rxId: string): Promise<void> {
+    await request(`/api/rx/${encodeURIComponent(rxId)}/revoke`, { method: "POST", ...json({}) }, "Could not revoke the code.");
   },
 
   async listIssued(): Promise<IssuedRx[]> {

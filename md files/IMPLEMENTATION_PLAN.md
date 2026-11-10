@@ -103,7 +103,7 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 3. Auth lookup cache (#8)
    - In `getSessionUser`, add a 30 s LRU (max 1,000 entries) for the `getUser` result keyed by uid; invalidate on `DELETE /api/auth/session?all=1` and role/profile change.
    - Measure before/after request latency and Identity Toolkit call count; record in the PR.
-4. `web-push` 4.x upgrade after reading the changelog; keep the CI require(esm) check.
+4. ~~`web-push` 4.x upgrade~~ — **deferred**: 4.0.0 pulls an ESM-only dependency and fails `require()` with `ERR_REQUIRE_ESM`, the same failure that broke Vercel earlier (caught by the CI check). Stay on 3.6.x until web-push ships a CommonJS-compatible release.
 
 **Acceptance:** limiter tests run against both implementations; two parallel serverless instances share counts (manual check on a Vercel preview); anonymous user gets 403 on the restricted routes; p50 latency of an authenticated API call drops measurably.
 **Rollback:** env flags (`APP_CHECK_ENFORCE`, Redis vars unset → memory limiter); revert PR for the rest.
@@ -117,8 +117,8 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 **Tasks**
 1. Export & stats (#9)
    - `exportPrescriptions`: page through all records (200 per page) and stream the CSV via `ReadableStream`; keep the 5/min limit; add a row cap of e.g. 20,000 with a clear header note if hit.
-   - Unique meds: store `med_key` (normalised lowercase) on write; compute unique count with a distinct set over a `select("med_key")` scan paged, or maintain `users/{uid}/meta/stats` counters updated in the save/update/delete transactions. Choose counters if dashboards load often. Backfill with `scripts/migrate-prescriptions.mjs`.
-   - Cache stats per user for 30 s.
+   - Unique meds: **done by paged scan** of the `med` field (up to 10,000 records) rather than a stored `med_key` or counters, with the per-user 30 s cache below. No schema change or migration; the trade-off is up to 10 read-pages on a cache miss for very large histories. Move to counters if that becomes costly.
+   - Cache stats per user for 30 s (invalidated on save/update/delete on the same instance).
 2. Account deletion & export (#7)
    - `DELETE /api/auth/account`: requires a recent sign-in (≤ 5 min), then `db.recursiveDelete(users/{uid})`, deletes `rx_claims` where `uid == user` (keep a minimal tombstone `{jti, claimed: true}` so a deleted claim can't be re-claimed), then `auth.deleteUser`, then clears the cookie.
    - Settings UI: "Delete my account" with typed confirmation; link to the CSV export.
@@ -138,7 +138,7 @@ Each phase ends with a green `npm run lint && npm run typecheck && npm test && n
 
 **Tasks** (confirm product decisions first)
 1. Revocation: add `revoked_at` to `issued`; `POST /api/rx/[id]/revoke` (prescriber, own codes only); checked in `checkRx` and in the save transaction (read the issued doc inside the transaction).
-2. Claim window: make configurable per issue (24 h / 7 d / 30 d), default 7 d; stored in the signed `exp`.
+2. Claim window: make configurable per issue (24 h / 7 d / 30 d), default 7 d; stored in the signed `exp`. **Done** (decision: 7 days).
 3. Optional one-time PIN: on issue, generate a 6-digit PIN, store only an HMAC of it (`pin_hash`), show it once to the prescriber; the patient types it at save; limit 5 attempts per code (counter on `issued`), then lock the code. Feature-flag per prescriber so existing flows keep working.
 4. Prescriber UI: show claimed/unclaimed/revoked/expired, with revoke button.
 5. Tests: revoked code → `invalid/revoked` at verify and save; wrong PIN ×5 locks; claim race still single-winner (extend existing transaction test).

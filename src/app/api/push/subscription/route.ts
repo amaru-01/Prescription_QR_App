@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/server/auth";
+import { requireRegisteredUser, requireUser } from "@/lib/server/auth";
 import { BackendError, errorResponse, parseOrThrow } from "@/lib/server/errors";
 import { isPushConfigured } from "@/lib/server/push";
 import { deletePushSubscription, savePushSubscription } from "@/lib/server/reminders";
@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireUser();
-    rateLimit(`push:${user.uid}`, 10, 60_000);
+    const user = await requireRegisteredUser();
+    await rateLimit(`push:${user.uid}`, 10, 60_000);
     if (!isPushConfigured()) throw new BackendError("Notifications are not set up on this server yet.", 503);
 
     const subscription = parseOrThrow(pushSubscriptionSchema, await readJsonBody(request));

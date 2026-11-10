@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { cookieStore, adminAuth } = vi.hoisted(() => ({
   cookieStore: { get: vi.fn() },
@@ -18,8 +18,18 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("./firebase", () => ({ getAdminAuth: () => adminAuth }));
 
-const { createSessionCookie, getSessionUser, requirePageUser, requirePrescriber, requireUser, safeNextPath } =
-  await import("./auth");
+const authModule = await import("./auth");
+const {
+  clearUserCache,
+  createSessionCookie,
+  getSessionUser,
+  invalidateUserCache,
+  requirePageUser,
+  requirePrescriber,
+  requireRegisteredUser,
+  requireUser,
+  safeNextPath,
+} = authModule;
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const authError = (code: string) => Object.assign(new Error(code), { code });
@@ -40,6 +50,8 @@ function signedIn({ authTime = nowSeconds() - 60, provider = "password", user = 
 
 beforeEach(() => {
   vi.resetAllMocks();
+  clearUserCache();
+  delete process.env.AUTH_CACHE_TTL_MS;
 });
 
 describe("getSessionUser", () => {
@@ -180,5 +192,101 @@ describe("safeNextPath", () => {
     ["history", "/"],
   ])("%s -> %s", (input, expected) => {
     expect(safeNextPath(input)).toBe(expected);
+  });
+});
+
+describe("user lookup cache", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("looks the user up once for repeated requests within the TTL", async () => {
+    signedIn();
+    await getSessionUser();
+    await getSessionUser();
+    await getSessionUser();
+    expect(adminAuth.getUser).toHaveBeenCalledTimes(1);
+    expect(adminAuth.verifySessionCookie).toHaveBeenCalledTimes(3); // the cookie is still verified every time
+  });
+
+  it("looks the user up again after the TTL", async () => {
+    vi.useFakeTimers();
+    signedIn();
+    await getSessionUser();
+    vi.advanceTimersByTime(31_000);
+    await getSessionUser();
+    expect(adminAuth.getUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("picks up changes right away once the entry is invalidated", async () => {
+    signedIn();
+    await getSessionUser();
+    signedIn({ user: { customClaims: { role: "prescriber", credentialName: "Dr. Jane Smith" } } });
+    invalidateUserCache("u1");
+    await expect(getSessionUser()).resolves.toMatchObject({ role: "prescriber" });
+  });
+
+  it("still applies the revocation check to cached users", async () => {
+    const authTime = nowSeconds() - 60;
+    signedIn({ authTime, user: { tokensValidAfterTime: new Date((authTime + 10) * 1000).toUTCString() } });
+    await expect(getSessionUser()).resolves.toBeNull();
+    await expect(getSessionUser()).resolves.toBeNull();
+    expect(adminAuth.getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("can be turned off with AUTH_CACHE_TTL_MS=0", async () => {
+    process.env.AUTH_CACHE_TTL_MS = "0";
+    signedIn();
+    await getSessionUser();
+    await getSessionUser();
+    expect(adminAuth.getUser).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("requireRegisteredUser", () => {
+  it("lets registered users through", async () => {
+    signedIn();
+    await expect(requireRegisteredUser()).resolves.toMatchObject({ uid: "u1" });
+  });
+
+  it("rejects guests with 403", async () => {
+    signedIn({ provider: "anonymous" });
+    await expect(requireRegisteredUser()).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("rejects signed-out requests with 401", async () => {
+    cookieStore.get.mockReturnValue(undefined);
+    await expect(requireRegisteredUser()).rejects.toMatchObject({ statusCode: 401 });
+  });
+});
+
+describe("assertRecentSignIn", () => {
+  const { assertRecentSignIn } = authModule;
+  const decoded = (overrides = {}) => ({ uid: "u1", auth_time: nowSeconds() - 30, ...overrides });
+
+  it("accepts a fresh token for the same user", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded());
+    await expect(assertRecentSignIn("u1", "token")).resolves.toBeUndefined();
+    expect(adminAuth.verifyIdToken).toHaveBeenCalledWith("token", true);
+  });
+
+  it("requires a token", async () => {
+    await expect(assertRecentSignIn("u1", undefined)).rejects.toMatchObject({ statusCode: 401 });
+    await expect(assertRecentSignIn("u1", "")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects a token that does not verify", async () => {
+    adminAuth.verifyIdToken.mockRejectedValue(authError("auth/id-token-revoked"));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects another user's token", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded({ uid: "attacker" }));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects a sign-in older than five minutes", async () => {
+    adminAuth.verifyIdToken.mockResolvedValue(decoded({ auth_time: nowSeconds() - 6 * 60 }));
+    await expect(assertRecentSignIn("u1", "token")).rejects.toMatchObject({ statusCode: 401 });
   });
 });

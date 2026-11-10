@@ -53,13 +53,23 @@ export const saveRequestSchema = prescriptionInputSchema.extend({
   source: sourceSchema.catch("scan").default("scan"),
   notes: notesSchema.optional(),
   rx: rxTokenSchema.optional(),
+  /** One-time PIN for prescriber-protected codes. */
+  pin: z
+    .string({ error: "The PIN must be 6 digits." })
+    .regex(/^\d{6}$/, "The PIN must be 6 digits.")
+    .optional(),
 });
 
 /** POST /api/rx/verify body: the token plus the fields as currently reviewed. */
 export const rxVerifyRequestSchema = prescriptionInputSchema.extend({ rx: rxTokenSchema });
 
-/** POST /api/rx/issue body. */
-export const rxIssueRequestSchema = prescriptionInputSchema;
+/** POST /api/rx/issue body: the prescription, how long it can be saved, and whether it needs a PIN. */
+export const rxIssueRequestSchema = prescriptionInputSchema.extend({
+  validityDays: z
+    .union([z.literal(1), z.literal(7), z.literal(30)], { error: "Choose 1, 7 or 30 days." })
+    .default(7),
+  requirePin: z.boolean({ error: "requirePin must be true or false." }).default(false),
+});
 
 const timeZoneSchema = z
   .string()
