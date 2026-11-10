@@ -14,8 +14,17 @@ import crypto from "node:crypto";
  */
 
 export const RX_TOKEN_PREFIX = "vd1";
-/** How long a patient has to save (claim) a newly issued prescription. */
-export const RX_CLAIM_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+/** Claim windows a prescriber can choose, in days. */
+export const RX_VALIDITY_DAYS = [1, 7, 30] as const;
+export type RxValidityDays = (typeof RX_VALIDITY_DAYS)[number];
+/** How long a patient has to save (claim) a newly issued prescription, unless the prescriber picks another. */
+export const RX_CLAIM_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * Issued-code and claim records are kept this long after the code expires, then
+ * removed by a Firestore TTL policy on their `purge_at` field. Claims must
+ * outlive the code itself, otherwise an expired-but-copied QR could be claimed twice.
+ */
+export const RX_RECORD_RETENTION_SECONDS = 90 * 24 * 60 * 60;
 
 export interface RxPayload {
   v: 1;
@@ -30,6 +39,8 @@ export interface RxPayload {
   med: string;
   dose: string;
   duration: string;
+  /** True when the prescriber required a one-time PIN to claim this code. */
+  pin?: true;
   /** Issued at / expires at, in Unix seconds. */
   iat: number;
   exp: number;
@@ -79,7 +90,11 @@ export function newRxId(): string {
   return b64url(crypto.randomBytes(15));
 }
 
-export function signRx(fields: Omit<RxPayload, "v" | "kid" | "iat" | "exp">, now = new Date()): {
+export function signRx(
+  fields: Omit<RxPayload, "v" | "kid" | "iat" | "exp">,
+  now = new Date(),
+  windowSeconds = RX_CLAIM_WINDOW_SECONDS
+): {
   token: string;
   payload: RxPayload;
 } {
@@ -87,7 +102,7 @@ export function signRx(fields: Omit<RxPayload, "v" | "kid" | "iat" | "exp">, now
   if (!keys) throw new Error("RX_SIGNING_PRIVATE_KEY is not configured.");
 
   const iat = Math.floor(now.getTime() / 1000);
-  const payload: RxPayload = { v: 1, ...fields, kid: keys.kid, iat, exp: iat + RX_CLAIM_WINDOW_SECONDS };
+  const payload: RxPayload = { v: 1, ...fields, kid: keys.kid, iat, exp: iat + windowSeconds };
   const signingInput = `${RX_TOKEN_PREFIX}.${b64url(Buffer.from(JSON.stringify(payload), "utf8"))}`;
   const signature = crypto.sign(null, Buffer.from(signingInput, "ascii"), keys.privateKey);
   return { token: `${signingInput}.${b64url(signature)}`, payload };
@@ -99,6 +114,7 @@ function isPayload(value: unknown): value is RxPayload {
     !!p &&
     p.v === 1 &&
     [p.jti, p.iss, p.isn, p.kid, p.med, p.dose, p.duration].every((field) => typeof field === "string" && field) &&
+    (p.pin === undefined || p.pin === true) &&
     Number.isInteger(p.iat) &&
     Number.isInteger(p.exp)
   );

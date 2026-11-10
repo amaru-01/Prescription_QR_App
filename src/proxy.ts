@@ -8,20 +8,27 @@ const PUBLIC_PATHS = new Set(["/login", "/signup", "/offline", "/health"]);
 /** Firebase Auth REST endpoints the client SDK calls during sign-in. */
 const FIREBASE_AUTH_ORIGINS = "https://identitytoolkit.googleapis.com https://securetoken.googleapis.com";
 
+/** Extra origins reCAPTCHA Enterprise needs, only when App Check is configured. */
+const APP_CHECK_SCRIPT_ORIGINS = "https://www.google.com https://www.gstatic.com";
+const APP_CHECK_CONNECT_ORIGINS =
+  "https://content-firebaseappcheck.googleapis.com https://recaptchaenterprise.googleapis.com https://www.google.com";
+const APP_CHECK_FRAME_ORIGINS = "https://www.google.com https://recaptcha.google.com";
+
 function contentSecurityPolicy(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
+  const appCheck = Boolean(process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY);
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${appCheck ? ` ${APP_CHECK_SCRIPT_ORIGINS}` : ""}${isDev ? " 'unsafe-eval'" : ""}`,
     // React `style={...}` attributes need inline styles; scripts stay nonce-only.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "font-src 'self' data:",
-    `connect-src 'self' ${FIREBASE_AUTH_ORIGINS}${isDev ? " ws:" : ""}`,
+    `connect-src 'self' ${FIREBASE_AUTH_ORIGINS}${appCheck ? ` ${APP_CHECK_CONNECT_ORIGINS}` : ""}${isDev ? " ws:" : ""}`,
     "media-src 'self' blob:",
     "worker-src 'self'",
     "manifest-src 'self'",
-    "frame-src 'none'",
+    appCheck ? `frame-src ${APP_CHECK_FRAME_ORIGINS}` : "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/server/auth";
 import { BackendError, errorResponse } from "@/lib/server/errors";
 import { listPrescriptionPage } from "@/lib/server/prescriptions";
+import { rateLimit } from "@/lib/server/security";
 import { firstMessage, listQuerySchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const user = await requireUser();
+    await rateLimit(`read:${user.uid}`, 120, 60_000);
 
     const params = new URL(request.url).searchParams;
     const query = listQuerySchema.safeParse({

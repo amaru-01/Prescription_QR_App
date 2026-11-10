@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
-    rateLimit(`rx-verify:${user.uid}`, 60, 60_000);
+    await rateLimit(`rx-verify:${user.uid}`, 60, 60_000);
 
     const { rx, ...input } = parseOrThrow(rxVerifyRequestSchema, await readJsonBody(request));
     const check = await checkRx(user.uid, rx, input);

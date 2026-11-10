@@ -7,9 +7,9 @@ import { resetSigningKeyCache, signRx } from "@/lib/server/rx-signing";
 
 const { auth, data, rx, reminders, push, adminAuth } = vi.hoisted(() => ({
   adminAuth: { updateUser: vi.fn() },
-  auth: { requireUser: vi.fn(), requirePrescriber: vi.fn() },
+  auth: { requireUser: vi.fn(), requirePrescriber: vi.fn(), requireRegisteredUser: vi.fn(), invalidateUserCache: vi.fn() },
   data: { savePrescription: vi.fn() },
-  rx: { issuePrescription: vi.fn(), listIssued: vi.fn(), checkRx: vi.fn() },
+  rx: { issuePrescription: vi.fn(), listIssued: vi.fn(), checkRx: vi.fn(), revokeIssued: vi.fn() },
   reminders: {
     runDueReminders: vi.fn(),
     updateReminder: vi.fn(),
@@ -30,6 +30,7 @@ vi.mock("@/lib/server/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), 
 
 const save = await import("./save/route");
 const issue = await import("./rx/issue/route");
+const revoke = await import("./rx/[id]/revoke/route");
 const cron = await import("./cron/reminders/route");
 const reminder = await import("./reminders/[id]/route");
 const doses = await import("./reminders/[id]/doses/route");
@@ -66,6 +67,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   const user = { uid: `user-${++uidCounter}`, role: "patient", isAnonymous: false };
   auth.requireUser.mockResolvedValue(user);
+  auth.requireRegisteredUser.mockResolvedValue(user);
   auth.requirePrescriber.mockResolvedValue({ ...user, role: "prescriber", name: "Dr Wanjiru" });
   data.savePrescription.mockImplementation(async (_uid, input, options) => ({
     documentId: "doc1",
@@ -97,6 +99,24 @@ describe("POST /api/save with a signed code", () => {
     expect((await res.json()).rx).toEqual({ status: "invalid", reason: "malformed" });
   });
 
+  it("passes a valid PIN through to the claim transaction", async () => {
+    await save.POST(post("/api/save", { ...signed, rx: token(), pin: "042917" }));
+    expect(data.savePrescription.mock.calls[0][2].pin).toBe("042917");
+  });
+
+  it.each(["12345", "1234567", "abcdef", "12 345"])("rejects a malformed PIN %j", async (pin) => {
+    const res = await save.POST(post("/api/save", { ...signed, rx: token(), pin }));
+    expect(res.status).toBe(422);
+    expect(data.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a wrong-PIN refusal", async () => {
+    data.savePrescription.mockRejectedValue(new BackendError("That PIN doesn't match. 4 attempts left.", 403));
+    const res = await save.POST(post("/api/save", { ...signed, rx: token(), pin: "000000" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toContain("4 attempts left");
+  });
+
   it("surfaces the duplicate-claim conflict", async () => {
     data.savePrescription.mockRejectedValue(new BackendError("You've already saved this prescription.", 409));
     const res = await save.POST(post("/api/save", { ...signed, rx: token() }));
@@ -124,6 +144,64 @@ describe("POST /api/rx/issue", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ qr_text: '{"rx":"vd1..."}', issued: { rxId: "r1" } });
   });
+
+  it("defaults to a 7-day window and no PIN", async () => {
+    rx.issuePrescription.mockResolvedValue({ qrText: "{}", issued: { rxId: "r1" }, pin: null });
+    await issue.POST(post("/api/rx/issue", signed));
+    expect(rx.issuePrescription).toHaveBeenCalledWith(expect.anything(), signed, { validityDays: 7, requirePin: false });
+  });
+
+  it("passes the chosen window and PIN option, keeping them out of the signed fields", async () => {
+    rx.issuePrescription.mockResolvedValue({ qrText: "{}", issued: { rxId: "r1" }, pin: "042917" });
+    const res = await issue.POST(post("/api/rx/issue", { ...signed, validityDays: 1, requirePin: true }));
+    expect(rx.issuePrescription).toHaveBeenCalledWith(expect.anything(), signed, { validityDays: 1, requirePin: true });
+    expect(await res.json()).toMatchObject({ pin: "042917" });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it.each([2, 365, "7", 0])("rejects an unsupported window %j", async (validityDays) => {
+    const res = await issue.POST(post("/api/rx/issue", { ...signed, validityDays }));
+    expect(res.status).toBe(422);
+    expect(rx.issuePrescription).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/rx/[id]/revoke", () => {
+  const call = (id = "abc123") => revoke.POST(post(`/api/rx/${id}/revoke`, {}), params(id));
+
+  it("is forbidden for patients", async () => {
+    auth.requirePrescriber.mockRejectedValue(new BackendError("Only prescriber accounts can do this.", 403));
+    expect((await call()).status).toBe(403);
+    expect(rx.revokeIssued).not.toHaveBeenCalled();
+  });
+
+  it("revokes only within the signed-in prescriber's own codes", async () => {
+    auth.requirePrescriber.mockResolvedValue({ uid: "doc-1", role: "prescriber" });
+    expect((await call("abc123")).status).toBe(200);
+    expect(rx.revokeIssued).toHaveBeenCalledWith("doc-1", "abc123");
+  });
+
+  it("returns 409 for a code a patient already saved", async () => {
+    rx.revokeIssued.mockRejectedValue(new BackendError("A patient has already saved this prescription.", 409));
+    expect((await call()).status).toBe(409);
+  });
+
+  it("rejects malformed ids without touching the database", async () => {
+    expect((await call("../users")).status).toBe(404);
+    expect(rx.revokeIssued).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-site requests", async () => {
+    const res = await revoke.POST(
+      new Request(`${ORIGIN}/api/rx/abc/revoke`, {
+        method: "POST",
+        headers: { "content-type": "application/json", host: "veridose.app", origin: "https://evil.example" },
+        body: "{}",
+      }),
+      params("abc")
+    );
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("/api/cron/reminders", () => {
@@ -146,10 +224,10 @@ describe("/api/cron/reminders", () => {
   it("runs due reminders with the right secret", async () => {
     process.env.CRON_SECRET = "s3cret-value";
     push.isPushConfigured.mockReturnValue(true);
-    reminders.runDueReminders.mockResolvedValue({ due: 2, sent: 1, skipped: 1 });
+    reminders.runDueReminders.mockResolvedValue({ due: 2, sent: 1, sentSubscriptions: 1, skipped: 1, failed: 0, retried: 0 });
     const res = await call("Bearer s3cret-value");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true, due: 2, sent: 1, skipped: 1 });
+    expect(await res.json()).toEqual({ success: true, due: 2, sent: 1, sentSubscriptions: 1, skipped: 1, failed: 0, retried: 0 });
   });
 });
 
@@ -215,5 +293,26 @@ describe("PATCH /api/auth/profile", () => {
     const res = await profile.PATCH(post("/api/auth/profile", { name: "Dr. Somebody Else, Chief of Surgery" }, "PATCH"));
     expect(res.status).toBe(403);
     expect(adminAuth.updateUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("guest accounts", () => {
+  const guestBlocked = () =>
+    auth.requireRegisteredUser.mockRejectedValue(new BackendError("Create a free account to use this feature.", 403));
+
+  it("cannot change reminders, log doses or import", async () => {
+    guestBlocked();
+    expect((await reminder.PUT(post("/api/reminders/abc", { time: "08:00", timezone: "UTC" }, "PUT"), params("abc"))).status).toBe(403);
+    expect((await doses.POST(post("/api/reminders/abc/doses", { day: "2026-11-02", taken: true }), params("abc"))).status).toBe(403);
+    expect(reminders.updateReminder).not.toHaveBeenCalled();
+    expect(reminders.setDoseTaken).not.toHaveBeenCalled();
+  });
+
+  it("cannot register push subscriptions", async () => {
+    guestBlocked();
+    push.isPushConfigured.mockReturnValue(true);
+    const body = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "k", auth: "a" } };
+    expect((await subscription.POST(post("/api/push/subscription", body))).status).toBe(403);
+    expect(reminders.savePushSubscription).not.toHaveBeenCalled();
   });
 });

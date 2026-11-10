@@ -1,6 +1,7 @@
 "use client";
 
-import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
+import { getApp, getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
+import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from "firebase/app-check";
 import { inMemoryPersistence, initializeAuth, type Auth } from "firebase/auth";
 
 /** Public web config (Firebase Console → Project settings → Your apps). Safe to expose. */
@@ -11,7 +12,32 @@ const config: FirebaseOptions = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+const APP_CHECK_SITE_KEY = process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY;
+
 let auth: Auth | null = null;
+let appCheck: AppCheck | null = null;
+
+function getClientApp(): FirebaseApp {
+  return getApps().length ? getApp() : initializeApp(config);
+}
+
+/**
+ * An App Check token for the session exchange, or null when App Check is not
+ * configured (or the token could not be fetched; the server decides whether
+ * that is acceptable). Tokens come from reCAPTCHA Enterprise, no user prompt.
+ */
+export async function getAppCheckToken(): Promise<string | null> {
+  if (!APP_CHECK_SITE_KEY) return null;
+  try {
+    appCheck ??= initializeAppCheck(getClientApp(), {
+      provider: new ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),
+      isTokenAutoRefreshEnabled: false,
+    });
+    return (await getToken(appCheck)).token;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Firebase Auth is used only to sign in and mint an ID token, which is then
@@ -26,7 +52,6 @@ export function getClientAuth(): Auth {
       "Firebase web config is missing. Set the NEXT_PUBLIC_FIREBASE_* variables (see .env.example)."
     );
   }
-  const app = getApps().length ? getApp() : initializeApp(config);
-  auth = initializeAuth(app, { persistence: inMemoryPersistence });
+  auth = initializeAuth(getClientApp(), { persistence: inMemoryPersistence });
   return auth;
 }

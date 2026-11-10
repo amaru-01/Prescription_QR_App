@@ -21,6 +21,7 @@ async function prescriptionId(context: Context): Promise<string> {
 export async function GET(_request: Request, context: Context) {
   try {
     const user = await requireUser();
+    await rateLimit(`read:${user.uid}`, 120, 60_000);
     const id = await prescriptionId(context);
     const prescription = await getPrescriptionById(user.uid, id);
     return Response.json({ success: true, prescription }, { headers: { "Cache-Control": "no-store" } });
@@ -33,7 +34,7 @@ export async function PATCH(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
-    rateLimit(`write:${user.uid}`, 60, 60_000);
+    await rateLimit(`write:${user.uid}`, 60, 60_000);
     const id = await prescriptionId(context);
     const updates = parseOrThrow(updateRequestSchema, await readJsonBody(request));
 
@@ -49,7 +50,7 @@ export async function DELETE(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
     const user = await requireUser();
-    rateLimit(`write:${user.uid}`, 60, 60_000);
+    await rateLimit(`write:${user.uid}`, 60, 60_000);
     const id = await prescriptionId(context);
     await deletePrescription(user.uid, id);
     return Response.json({ success: true, message: "Prescription deleted." });

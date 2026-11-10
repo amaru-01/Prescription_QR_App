@@ -1,6 +1,13 @@
 import crypto from "node:crypto";
 
-import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  Timestamp,
+  type DocumentData,
+  type DocumentSnapshot,
+  type QueryDocumentSnapshot,
+  type Transaction,
+} from "firebase-admin/firestore";
 
 import { isAllowedPushEndpoint, MAX_PUSH_SUBSCRIPTIONS } from "@/lib/push-hosts";
 import { isValidTime, isValidTimeZone, localDayKey, nextOccurrence } from "@/lib/schedule";
@@ -192,16 +199,30 @@ export async function importReminders(
   return imported;
 }
 
-/** Keep reminders in step with the prescription lifecycle. */
-export async function onPrescriptionStatusChanged(uid: string, prescriptionId: string, status: PrescriptionStatus) {
-  const ref = reminderRef(uid, prescriptionId);
-  const snapshot = await ref.get();
-  if (!snapshot.exists) return;
-  await ref.update({ next_due_at: nextDueAt(toState(snapshot.data()), status === "active") });
+/**
+ * Keep reminders in step with the prescription lifecycle. These helpers take
+ * part in the caller's transaction, so a prescription and its reminder always
+ * change together (never an archived prescription with a live reminder).
+ *
+ * Firestore requires every read in a transaction before any write, so call
+ * `readReminder` first, then the `stage...` functions.
+ */
+export const readReminder = (tx: Transaction, uid: string, prescriptionId: string) =>
+  tx.get(reminderRef(uid, prescriptionId));
+
+export function stageReminderStatusChange(
+  tx: Transaction,
+  uid: string,
+  prescriptionId: string,
+  reminder: DocumentSnapshot,
+  status: PrescriptionStatus
+): void {
+  if (!reminder.exists) return;
+  tx.update(reminderRef(uid, prescriptionId), { next_due_at: nextDueAt(toState(reminder.data()), status === "active") });
 }
 
-export async function onPrescriptionDeleted(uid: string, prescriptionId: string) {
-  await reminderRef(uid, prescriptionId).delete();
+export function stageReminderDelete(tx: Transaction, uid: string, prescriptionId: string): void {
+  tx.delete(reminderRef(uid, prescriptionId));
 }
 
 /**
@@ -243,70 +264,202 @@ export type PushSender = (
 ) => Promise<"sent" | "gone" | "failed">;
 
 export interface CronResult {
+  /** Due reminders picked up in this run. */
   due: number;
+  /** Reminders delivered to at least one device. */
   sent: number;
+  /** Individual device notifications delivered (a reminder can reach several). */
+  sentSubscriptions: number;
+  /** Not sent: stale, already taken, inactive, no devices, or claimed by another run. */
   skipped: number;
+  /** Delivery failed on every device and no retry is left. */
+  failed: number;
+  /** Delivery failed on every device; scheduled to try again shortly. */
+  retried: number;
+}
+
+/** Reminders loaded per Firestore query. */
+const PAGE_SIZE = 200;
+/** Reminders processed in parallel. */
+const CONCURRENCY = 15;
+/** Stop starting new pages after this long, leaving headroom under the route's 60 s limit. */
+const TIME_BUDGET_MS = 45_000;
+/** A reminder whose every push failed is retried this much later... */
+export const RETRY_DELAY_MS = 5 * 60 * 1000;
+/** ...up to this many times, and never past the staleness window. */
+export const MAX_RETRIES = 2;
+
+/** Run `fn` over `items` with at most `limit` in flight. `fn` must not throw. */
+async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 /**
  * Send every reminder that is due. Each reminder is advanced to its next
  * occurrence *before* sending, with a precondition on the document's update
  * time, so overlapping cron runs never notify the same dose twice.
+ *
+ * Because processed reminders move into the future, simply re-running the
+ * same query yields the next page, so a backlog is drained in one invocation
+ * (until the time budget ends) instead of waiting for later runs.
+ *
+ * If a notification fails on every device (network error, push service 5xx),
+ * the reminder is rescheduled RETRY_DELAY_MS later, at most MAX_RETRIES times
+ * and never beyond the staleness window, instead of silently losing the dose.
  */
-export async function runDueReminders(send: PushSender, now = new Date()): Promise<CronResult> {
+export async function runDueReminders(
+  send: PushSender,
+  now = new Date(),
+  { budgetMs = TIME_BUDGET_MS }: { budgetMs?: number } = {}
+): Promise<CronResult> {
   const db = getDb();
-  const due = await db
-    .collectionGroup("reminders")
-    .where("next_due_at", "<=", Timestamp.fromDate(now))
-    .limit(500)
-    .get();
-
-  const result: CronResult = { due: due.size, sent: 0, skipped: 0 };
-
-  for (const doc of due.docs) {
-    const uid = doc.ref.parent.parent?.id;
-    const state = toState(doc.data());
-    const dueAt = (doc.get("next_due_at") as Timestamp).toDate();
-    if (!uid) continue;
-
-    const prescription = await userDoc(uid).collection("prescriptions").doc(doc.id).get();
-    const active = prescription.exists && (prescription.get("status") ?? "active") === "active";
-
-    try {
-      await doc.ref.update({ next_due_at: nextDueAt(state, active, now) }, { lastUpdateTime: doc.updateTime });
-    } catch {
-      result.skipped += 1; // Another run claimed this reminder first.
-      continue;
+  const startedAt = Date.now();
+  const result: CronResult = { due: 0, sent: 0, sentSubscriptions: 0, skipped: 0, failed: 0, retried: 0 };
+  const seen = new Set<string>();
+  const subscriptionCache = new Map<string, Promise<QueryDocumentSnapshot[]>>();
+  const devicesOf = (uid: string) => {
+    let cached = subscriptionCache.get(uid);
+    if (!cached) {
+      cached = subscriptionsOf(uid)
+        .get()
+        .then((snapshot) => snapshot.docs);
+      subscriptionCache.set(uid, cached);
     }
+    return cached;
+  };
 
-    const stale = now.getTime() - dueAt.getTime() > STALE_AFTER_MS;
-    const alreadyTaken = state.takenDays.includes(localDayKey(dueAt, state.timezone));
-    if (!active || stale || alreadyTaken) {
-      result.skipped += 1;
-      continue;
-    }
+  while (Date.now() - startedAt < budgetMs) {
+    const page = await db
+      .collectionGroup("reminders")
+      .where("next_due_at", "<=", Timestamp.fromDate(now))
+      .limit(PAGE_SIZE)
+      .get();
 
-    // Deliberately generic: lock screens are visible to others, so no medication names.
-    const payload = JSON.stringify({
-      title: "VeriDose reminder",
-      body: `It's time for your ${state.time} dose. Tap to check in.`,
-      url: "/reminders",
-      tag: `reminder-${doc.id}`,
+    // A reminder we could not advance would otherwise be fetched forever.
+    const fresh = page.docs.filter((doc) => !seen.has(reminderKey(doc)));
+    if (fresh.length === 0) break;
+    for (const doc of fresh) seen.add(reminderKey(doc));
+    result.due += fresh.length;
+
+    // One batched read for every prescription's status instead of one round trip each.
+    const prescriptionRefs = fresh.map((doc) => {
+      const uid = doc.ref.parent.parent?.id;
+      return uid ? userDoc(uid).collection("prescriptions").doc(doc.id) : null;
     });
+    const wanted = prescriptionRefs.filter((ref): ref is NonNullable<typeof ref> => ref !== null);
+    const loaded = wanted.length > 0 ? await db.getAll(...wanted) : [];
+    const prescriptionByPath = new Map(loaded.map((snapshot) => [snapshot.ref.path, snapshot]));
 
-    const subscriptions = await subscriptionsOf(uid).get();
-    for (const sub of subscriptions.docs) {
-      // Rows saved before the host allowlist existed: never send to them, and clean them up.
-      if (!isAllowedPushEndpoint(String(sub.get("endpoint") ?? ""))) {
-        await sub.ref.delete();
-        continue;
+    await mapPool(
+      fresh.map((doc, index) => ({ doc, ref: prescriptionRefs[index] })),
+      CONCURRENCY,
+      async ({ doc, ref }) => {
+        const uid = doc.ref.parent.parent?.id;
+        if (!uid || !ref) return;
+        try {
+          await processReminder(doc, uid, prescriptionByPath.get(ref.path), now, send, devicesOf, result);
+        } catch (error) {
+          result.skipped += 1;
+          logger.error("Reminder processing failed", { reminderId: doc.id, error });
+        }
       }
-      const outcome = await send({ endpoint: sub.get("endpoint"), keys: sub.get("keys") }, payload);
-      if (outcome === "sent") result.sent += 1;
-      else if (outcome === "gone") await sub.ref.delete();
-    }
+    );
   }
 
   if (result.due > 0) logger.info("Reminder cron finished", { ...result });
   return result;
+}
+
+const reminderKey = (doc: QueryDocumentSnapshot) => `${doc.ref.parent.parent?.id}/${doc.id}`;
+
+async function processReminder(
+  doc: QueryDocumentSnapshot,
+  uid: string,
+  prescription: DocumentSnapshot | undefined,
+  now: Date,
+  send: PushSender,
+  devicesOf: (uid: string) => Promise<QueryDocumentSnapshot[]>,
+  result: CronResult
+): Promise<void> {
+  const state = toState(doc.data());
+  // On a retry, `next_due_at` is the retry time; the dose's real due time is kept in `retry_origin`.
+  const origin = ((doc.get("retry_origin") ?? doc.get("next_due_at")) as Timestamp).toDate();
+  const attempts = Number(doc.get("attempts") ?? 0);
+  const active = Boolean(prescription?.exists) && (prescription?.get("status") ?? "active") === "active";
+
+  let advanced;
+  try {
+    advanced = await doc.ref.update(
+      {
+        next_due_at: nextDueAt(state, active, now),
+        retry_origin: FieldValue.delete(),
+        attempts: FieldValue.delete(),
+      },
+      { lastUpdateTime: doc.updateTime }
+    );
+  } catch {
+    result.skipped += 1; // Another run claimed this reminder first.
+    return;
+  }
+
+  const stale = now.getTime() - origin.getTime() > STALE_AFTER_MS;
+  const alreadyTaken = state.takenDays.includes(localDayKey(origin, state.timezone));
+  if (!active || stale || alreadyTaken) {
+    result.skipped += 1;
+    return;
+  }
+
+  // Deliberately generic: lock screens are visible to others, so no medication names.
+  const payload = JSON.stringify({
+    title: "VeriDose reminder",
+    body: `It's time for your ${state.time} dose. Tap to check in.`,
+    url: "/reminders",
+    tag: `reminder-${doc.id}`,
+  });
+
+  let delivered = 0;
+  let failures = 0;
+  for (const sub of await devicesOf(uid)) {
+    // Rows saved before the host allowlist existed: never send to them, and clean them up.
+    if (!isAllowedPushEndpoint(String(sub.get("endpoint") ?? ""))) {
+      await sub.ref.delete();
+      continue;
+    }
+    const outcome = await send({ endpoint: sub.get("endpoint"), keys: sub.get("keys") }, payload);
+    if (outcome === "sent") delivered += 1;
+    else if (outcome === "gone") await sub.ref.delete();
+    else failures += 1;
+  }
+
+  if (delivered > 0) {
+    result.sent += 1;
+    result.sentSubscriptions += delivered;
+    return;
+  }
+  if (failures === 0) {
+    result.skipped += 1; // No devices to notify.
+    return;
+  }
+
+  // Every delivery failed: try again soon, unless out of retries or the dose would be stale by then.
+  const retryAt = new Date(now.getTime() + RETRY_DELAY_MS);
+  if (attempts >= MAX_RETRIES || retryAt.getTime() - origin.getTime() > STALE_AFTER_MS) {
+    result.failed += 1;
+    logger.warn("Reminder could not be delivered", { reminderId: doc.id, attempts: attempts + 1 });
+    return;
+  }
+  try {
+    // Only if nobody (e.g. the user turning reminders off) changed it since we advanced it.
+    await doc.ref.update(
+      { next_due_at: Timestamp.fromDate(retryAt), retry_origin: Timestamp.fromDate(origin), attempts: attempts + 1 },
+      { lastUpdateTime: advanced?.writeTime }
+    );
+    result.retried += 1;
+  } catch {
+    result.failed += 1;
+  }
 }

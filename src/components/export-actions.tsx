@@ -22,7 +22,7 @@ export function ExportActions({ compact = false }: { compact?: boolean }) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      toast({ title: "CSV downloaded", description: "Up to 500 recent records were exported.", variant: "success" });
+      toast({ title: "CSV downloaded", description: "All of your records were exported.", variant: "success" });
     } catch (error) {
       toast({
         title: "CSV export failed",
